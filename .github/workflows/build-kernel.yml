@@ -18,7 +18,7 @@ on:
       kernel_branch:
         description: 'Kernel source branch'
         required: false
-        default: "Linux5-Staging"
+        default: "Linux6-Staging"
       kernel_commit:
         description: 'Kernel source commit'
         required: false
@@ -718,7 +718,7 @@ jobs:
           cd work/common
           echo "=== 4. Setting up ReSukiSU ==="
           
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
 
           # NOTE: Removed duplicate 'echo' KSU and KPROBES configs to prevent self-heal double-injection.
           # These are already defined safely in the append_config environment variable.
