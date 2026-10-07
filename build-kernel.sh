@@ -170,8 +170,8 @@ fetch_kernel() {
 
 resolve_clang_dir() {
     local dir found
-    # Add Neutron Clang directory to search path
-    for dir in "$WORK_DIR/neutron-clang" \
+    # Add Neutron Clang directory to search path (Fixed path to SCRIPT_DIR)
+    for dir in "$SCRIPT_DIR/neutron-clang" \
                "$WORK_DIR/prebuilts-master/clang/host/linux-x86" \
                "$WORK_DIR/prebuilts/clang/host/linux-x86" \
                "$WORK_DIR"; do
@@ -222,12 +222,11 @@ fetch_clang_extract() {
 fetch_clang() {
     # Custom Logic for Neutron Clang 24 Download
     if [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
-        local neutron_dir="$WORK_DIR/neutron-clang"
+        local neutron_dir="$SCRIPT_DIR/neutron-clang" # <-- Yahan SCRIPT_DIR kar diya gaya hai
         if [ ! -x "$neutron_dir/bin/clang" ]; then
             info "Downloading Neutron Clang via antman..."
             mkdir -p "$neutron_dir"
             
-            # Yahan par antman ko correctly download aur execute permission di gayi hai
             (cd "$neutron_dir" && curl -sO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" && chmod +x antman && ./antman -S && ./antman --patch=glibc)
         fi
         
@@ -248,9 +247,6 @@ fetch_clang() {
         fi
         return 0
     fi
-
-    # ... Yahan se aage ka purana code waise hi rehne dein ...
-
 
     local root=$WORK_DIR/prebuilts-master/clang/host/linux-x86
     local tarball=$WORK_DIR/downloads/clang.tar.zst
