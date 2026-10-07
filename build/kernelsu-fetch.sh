@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fetch the ksud (ReSukiSU) binaries the flashable zip needs to replace the kernel on
-# device. ReSukiSU is built into the kernel source itself, so no
+# Fetch the ksud (BakaSU) binaries the flashable zip needs to replace the kernel on
+# device. BakaSU is built into the kernel source itself, so no
 # kernelsu.ko LKM or ksuinit ramdisk component is required anymore: ksud's
 # `boot-patch --no-install` swaps only the kernel image.
 #
@@ -17,10 +17,10 @@ set -euo pipefail
 
 SCRIPT_NAME=${0##*/}
 
-# ==> SETTINGS FOR RESUKISU INTEGRATION <==
-KSU_OWNER=${KSU_OWNER:-ReSukiSU}
-KSU_REPO=${KSU_REPO:-ReSukiSU}
-KSU_BRANCH=${KSU_BRANCH:-main} # ReSukiSU uses 'main'
+# ==> SETTINGS FOR BAKASU INTEGRATION <==
+KSU_OWNER=${KSU_OWNER:-Baka-SU}
+KSU_REPO=${KSU_REPO:-BakaSU}
+KSU_BRANCH=${KSU_BRANCH:-main} # BakaSU uses 'main'
 KSUD_TARGETS=${KSUD_TARGETS:-"aarch64-linux-android armv7-linux-androideabi"}
 KSU_PREBUILT_BASE=${KSU_PREBUILT_BASE:-}
 OUT_DIR=${OUT_DIR:-$PWD/kernelsu}
@@ -37,14 +37,14 @@ usage() {
     cat <<EOF
 Usage: ./$SCRIPT_NAME [options]
 
-Downloads the ReSukiSU binaries (arm64 + armv7) that patch a kernel into an
+Downloads the BakaSU binaries (arm64 + armv7) that patch a kernel into an
 existing boot image on device. Prefers durable prebuilt assets on
 KSU_PREBUILT_BASE; falls back to the latest successful GitHub Actions run
 (needs GITHUB_TOKEN).
 
 Environment:
-  KSU_OWNER          ReSukiSU repository owner (default: ReSukiSU)
-  KSU_REPO           ReSukiSU repository repo (default: ReSukiSU)
+  KSU_OWNER          BakaSU repository owner (default: Baka-SU)
+  KSU_REPO           BakaSU repository repo (default: BakaSU)
   KSU_BRANCH         Branch of the latest run (default: main)
   KSUD_TARGETS       Space-separated ksud Android targets (default:
                      aarch64-linux-android armv7-linux-androideabi)
@@ -98,15 +98,15 @@ download_zip() {
     [ -n "${RUN_ID:-}" ] || RUN_ID=$(curl_dl -sfL -H "Authorization: Bearer $GITHUB_TOKEN" \
         "$API/actions/runs?branch=$KSU_BRANCH&status=success&per_page=1" 2>/dev/null | \
         python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" || true)
-    [ -n "$RUN_ID" ] || die "no successful $KSU_OWNER/$KSU_REPO run on $KSU_BRANCH"
+    [ -n "$RUN_ID" ] || die "no successful $KSU_OWNER/$KSU_REPO run on$KSU_BRANCH"
     aid=$(curl_dl -sfL -H "Authorization: Bearer $GITHUB_TOKEN" \
         "$API/actions/runs/$RUN_ID/artifacts?name=$artifact" | \
         python3 -c "import json,sys; a=json.load(sys.stdin).get('artifacts',[]); print(a[0]['id'] if a else '')" || true)
-    [ -n "$aid" ] || die "artifact '$artifact' not found in run $RUN_ID"
+    [ -n "$aid" ] || die "artifact '$artifact' not found in run$RUN_ID"
     curl_dl -fL --retry 3 -sS -o "$zip" \
         -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
         "$API/actions/artifacts/$aid/zip"
-    ok "$artifact artifact (run $RUN_ID)"
+    ok "$artifact artifact (run$RUN_ID)"
 }
 
 mkdir -p "$OUT_DIR"
