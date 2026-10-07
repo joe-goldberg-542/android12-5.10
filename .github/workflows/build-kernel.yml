@@ -95,8 +95,8 @@ jobs:
       - name: Configure Git Safe Directory & Identity
         run: |
           git config --global --add safe.directory "*"
-          git config --global user.email "Antonio_Nelson@proton.me"
-          git config --global user.name "Chor-A"
+          git config --global user.email "joe_goldberg_542@protonmail.com"
+          git config --global user.name "joe-goldberg-542"
 
       - name: Restore ccache cache
         if: ${{ inputs.ccache }}
@@ -1106,7 +1106,7 @@ jobs:
             gh release upload "$tag" --clobber "${assets[@]}"
           else
             gh release create "$tag" \
-              --title "Templar Kernel GKI $tag" \
-              --notes "Built with ReSukiSU, SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --title "Kernel GKI $tag" \
+              --notes "Built with bakaSU, SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
