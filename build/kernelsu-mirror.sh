@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mirror the ReSukiSU ksud binaries from the latest successful GitHub
+# Mirror the BakaSU ksud binaries from the latest successful GitHub
 # Actions run into ksu-<artifact>.zip files, ready for the durable prebuilts
 # release. build-kernel.yml consumes these via kernelsu-fetch.sh's
 # KSU_PREBUILT_BASE fallback, which expects ksu-<artifact>.zip naming, so the
 # 90-day actions-artifact expiry never blocks a kernel build.
 #
-# ReSukiSU is built into the Templar kernel source itself, so only ksud is
+# BakaSU is built into the Templar kernel source itself, so only ksud is
 # mirrored (it swaps the kernel image on device).
 #
 # Outputs are written to OUT_DIR (default: ./ksu-assets):
 #   ksu-ksud-aarch64-linux-android.zip ksu-ksud-armv7-linux-androideabi.zip
 
-# ==> SETTINGS FOR RESUKISU INTEGRATION <==
-KSU_OWNER=${KSU_OWNER:-ReSukiSU}
-KSU_REPO=${KSU_REPO:-ReSukiSU}
-KSU_BRANCH=${KSU_BRANCH:-main} # ReSukiSU uses 'main', not 'master'
+# ==> SETTINGS FOR BAKASU INTEGRATION <==
+KSU_OWNER=${KSU_OWNER:-Baka-SU}
+KSU_REPO=${KSU_REPO:-BakaSU}
+KSU_BRANCH=${KSU_BRANCH:-main} # BakaSU uses 'main', not 'master'
 KSU_WANT=${KSU_WANT:-'ksud-*'}
 OUT_DIR=${OUT_DIR:-$PWD/ksu-assets}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
