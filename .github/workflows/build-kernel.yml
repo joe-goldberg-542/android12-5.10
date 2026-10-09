@@ -315,6 +315,43 @@ jobs:
           
           echo "✅ BORE Balanced tuning applied!"
 
+      - name: Smart Governor Spoof (Redirect WALT to Schedutil)
+        run: |
+          cd work/common
+          
+          echo "=== 1. Set Schedutil as Default in Defconfig ==="
+          sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set/g' arch/arm64/configs/gki_defconfig
+          sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_WALT=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_WALT is not set/g' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y" >> arch/arm64/configs/gki_defconfig
+
+          echo "=== 2. Smart Governor Redirection (Python Engine) ==="
+          python3 - << 'EOF'
+          import os
+          path = "drivers/cpufreq/cpufreq.c"
+          if os.path.exists(path):
+              with open(path, "r") as f:
+                  content = f.read()
+              
+              # Original line in cpufreq.c
+              target = 'ret = sscanf(buf, "%15s", str_governor);'
+              
+              # Injected C code that redirects "walt" (or "performance") requests to "schedutil"
+              inject = """/* SMART SPOOF: Redirect WALT/Performance requests directly to Schedutil */
+          \tif (buf && (strstr(buf, "walt") || strstr(buf, "performance"))) {
+          \t\tbuf = "schedutil";
+          \t}
+          \tret = sscanf(buf, "%15s", str_governor);"""
+              
+              if target in content:
+                  content = content.replace(target, inject)
+                  with open(path, "w") as f:
+                      f.write(content)
+                  print("✅ Governor Redirection Active! WALT/Performance = Schedutil.")
+              else:
+                  print("⚠️ Target sscanf not found. Check cpufreq.c structure.")
+          EOF
+
       - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
         run: |
           cd work/common
@@ -651,9 +688,6 @@ jobs:
           echo "=== 4. Setting up ReSukiSU ==="
           
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
-
-          # NOTE: Removed duplicate 'echo' KSU and KPROBES configs to prevent self-heal double-injection.
-          # These are already defined safely in the append_config environment variable.
           
           echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
           
@@ -674,7 +708,6 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> arch/arm64/configs/gki_defconfig
           echo "✅ ReSukiSU + SuSFS applied successfully!"
-
           
       - name: Ensuring clean standard audit_fsnotify.c
         run: |
