@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y,CONFIG_LRU_GEN=y,CONFIG_LRU_GEN_ENABLED=y,CONFIG_SCHED_BORE=y"
+        default: "CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y,CONFIG_LRU_GEN=y,CONFIG_LRU_GEN_ENABLED=y"
       ccache:
         description: 'Accelerate with ccache.'
         type: boolean
@@ -275,7 +275,7 @@ jobs:
                   print("✅ I/O Scheduler globally locked to 'none' (Advanced Engine).")
           EOF
 
-      - name: Apply Scheduler Tuning (PELT & Uclamp)
+      - name: Apply Scheduler Tuning (PELT)
         run: |
           cd work/common
 
@@ -290,9 +290,6 @@ jobs:
           CONFIG_CGROUPS=y
           CONFIG_CGROUP_SCHED=y
           CONFIG_FAIR_GROUP_SCHED=y
-          CONFIG_UCLAMP_TASK=y
-          CONFIG_UCLAMP_TASK_GROUP=y
-          CONFIG_UCLAMP_BUCKETS_COUNT=20
           CONFIG_CPU_FREQ_THERMAL=y
           CONFIG_SCHED_CASS=y
           CONFIG_CASS=y
@@ -301,19 +298,6 @@ jobs:
           echo "=== 2. Configure PELT Halflife to 32ms ==="
           sed -i '/CONFIG_PELT_UTIL_HALFLIFE_16=y/d' arch/arm64/configs/gki_defconfig
           echo "CONFIG_PELT_UTIL_HALFLIFE_32=y" >> arch/arm64/configs/gki_defconfig
-
-      - name: Tune BORE Scheduler (Balanced & Battery Friendly)
-        run: |
-          cd work/common
-          
-          echo "=== Tuning BORE for Daily Usage ==="
-          # Penalty Scale ko 1024 se badha kar 1280 kar diya taaki background tasks jaldi demote hon (Battery saving).
-          sed -i 's/sched_burst_penalty_scale    = 1024;/sched_burst_penalty_scale    = 1280;/g' kernel/sched/fair.c
-          
-          # Smoothness ko 1 se 2 kar diya taaki burst transitions zyada smooth hon.
-          sed -i 's/sched_burst_smoothness       = 1;/sched_burst_smoothness       = 2;/g' kernel/sched/fair.c
-          
-          echo "✅ BORE Balanced tuning applied!"
 
       - name: Smart Governor Spoof (Redirect WALT to Schedutil)
         run: |
