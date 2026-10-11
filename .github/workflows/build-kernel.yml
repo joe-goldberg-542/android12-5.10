@@ -226,7 +226,6 @@ jobs:
               if end_idx != -1: return content[:start_idx] + new_func_code + content[end_idx:], True
               return content, False
 
-          # A) Lock ZRAM to LZ4 permanently using Advanced Engine
           zram_path = "drivers/block/zram/zram_drv.c"
           if os.path.exists(zram_path):
               with open(zram_path, "r") as f: content = f.read()
@@ -236,7 +235,6 @@ jobs:
                                           struct device_attribute *attr,
                                           const char *buf, size_t len)
           {
-          \t/* BLOCK ROM ZRAM OVERWRITE - HARDCODED TO LZ4 */
           \treturn len;
           }"""
               new_content, success = replace_c_func_overkill(content, zram_pattern, zram_new_func)
@@ -244,28 +242,22 @@ jobs:
                   with open(zram_path, "w") as f: f.write(new_content)
                   print("✅ ZRAM LZ4 strictly locked (Advanced Engine).")
 
-          # B) Lock I/O Scheduler to 'none' globally
           elv_path = "block/elevator.c"
           if os.path.exists(elv_path):
               with open(elv_path, "r") as f: content = f.read()
               
-              # ++ ADD THIS LINE ++ (Safely bypasses Clang's unused-function strictness)
               content = '#pragma GCC diagnostic ignored "-Wunused-function"\n' + content
               
-              # 1. Block kernel from setting a default during boot
               elv_init_pattern = r"void\s+elevator_init_mq\([^)]*\)\s*"
               elv_init_new = """void elevator_init_mq(struct request_queue *q)
           {
-          \t/* FORCE 'NONE' SCHEDULER GLOBALLY - INIT BLOCKED */
           \treturn;
           }"""
               content, s1 = replace_c_func_overkill(content, elv_init_pattern, elv_init_new)
               
-              # 2. Block user-space/ROM from overriding it later
               elv_store_pattern = r"ssize_t\s+elv_iosched_store\([^)]*\)\s*"
               elv_store_new = """ssize_t elv_iosched_store(struct request_queue *q, const char *name, size_t count)
           {
-          \t/* BLOCK ROM SCHEDULER OVERWRITE */
           \treturn count;
           }"""
               content, s2 = replace_c_func_overkill(content, elv_store_pattern, elv_store_new)
@@ -317,11 +309,9 @@ jobs:
               with open(path, "r") as f:
                   content = f.read()
               
-              # Original line in cpufreq.c
               target = 'ret = sscanf(buf, "%15s", str_governor);'
               
-              # Injected C code that redirects "walt" (or "performance") requests to "schedutil"
-              inject = """/* SMART SPOOF: Redirect WALT/Performance requests directly to Schedutil */
+              inject = """
           \tif (buf && (strstr(buf, "walt") || strstr(buf, "performance"))) {
           \t\tbuf = "schedutil";
           \t}
@@ -365,7 +355,6 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
           
-          # NOTE: CONFIG_NOMOUNT=y removed to prevent self-heal double-injection
           echo "✅ Old NoMount wiped and Official Method 3 (dev branch) applied!"
 
       - name: Apply SUSFS, Custom Patches & Direct Code Spoofing
@@ -601,7 +590,6 @@ jobs:
               
               av_hook_injection = r"""\1
 
-          	/* --- SAFED AVC BYPASS --- */
           	if (unlikely(avd->allowed) && scontext && tcontext) {
           		if (unlikely(__kuid_val(current_uid()) >= 10000)) {
           			struct selinux_spoof_ids *s_ids;
@@ -625,15 +613,14 @@ jobs:
           			rcu_read_unlock();
           		}
           	}
-          	/* ------------------------------------- */"""
+          	"""
 
-              if "SAFED AVC BYPASS" not in serv_content:
+              if "avd->auditallow = 0;" not in serv_content:
                   serv_content = re.sub(target_av_call_regex, av_hook_injection, serv_content, count=1)
                   
                   engine_marker = '#include "policycap_names.h"'
                   engine_code = (
                       '#include "policycap_names.h"\n\n'
-                      '/* --- INJECTED: SECURE SELINUX ID SPOOF --- */\n'
                       '#include <linux/uidgid.h>\n#include <linux/cred.h>\n'
                       '#include <linux/rcupdate.h>\n#include <linux/spinlock.h>\n\n'
                       'struct selinux_spoof_ids { u16 cap_c, process_c, binder_c; u32 fsck_t, shell_t, su_t, adbd_t, adbroot_t; struct rcu_head rcu; };\n'
@@ -673,8 +660,11 @@ jobs:
           
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
           
-          echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
+          cd KernelSU
+          git checkout 5b76b884
+          cd ..
           
+          echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/gki_defconfig
@@ -697,14 +687,6 @@ jobs:
         run: |
           cd work/common
           cat << 'EOF' > kernel/audit_fsnotify.c
-          // SPDX-License-Identifier: GPL-2.0-or-later
-          /* audit_fsnotify.c -- tracking inodes
-           *
-           * Copyright 2003-2009,2014-2015 Red Hat, Inc.
-           * Copyright 2005 Hewlett-Packard Development Company, L.P.
-           * Copyright 2005 IBM Corporation
-           */
-
           #include <linux/kernel.h>
           #include <linux/audit.h>
           #include <linux/kthread.h>
@@ -892,23 +874,18 @@ jobs:
           
           echo "=== 5. Absolute Stealth: Dynamic UTS_RELEASE Injection ==="
           
-          # 1. Makefile se Kernel ka exact Base Version dynamically extract karein
           K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
           
-          # 2. Defconfig se default Localversion nikaalein (jaise -android12-9)
           LOCAL_VER="-android12-9"
           
-          # 3. Clean version string merge karein (No '+', No Git commits)
           CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
           echo "--> Dynamically detected clean version: $CURRENT_BUILD_VERSION"
           
-          # 4. Extract kiye gaye clean version ko seedha C Code mai lock kar dein
           sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$CURRENT_BUILD_VERSION\",/g" init/version.c
           
-          # 5. Default git tag script ko empty karke block karein (Safety)
           echo "#!/bin/sh" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
           
