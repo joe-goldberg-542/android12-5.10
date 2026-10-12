@@ -169,17 +169,6 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
-          
-          sed -i '1i #include <linux/cred.h>' include/linux/susfs_def.h
-          echo "✅ Fixed current_uid() missing header in susfs_def.h"
-
-          sed -i '1i #include <linux/cred.h>' fs/statfs.c
-          sed -i '2i #include <linux/susfs.h>' fs/statfs.c
-          
-          sed -i '/#include "internal.h"/a #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\nextern int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse);\n#endif' fs/statfs.c
-          echo "✅ Fixed SuSFS compilation headers and patch structural bugs!"
-
-          echo "int __attribute__((weak)) ksu_install_su_fd(struct file *file) { return 0; }" >> fs/susfs.c
 
       - name: Setting up ReSukiSU
         run: |
@@ -187,10 +176,6 @@ jobs:
           echo "=== Setting up ReSukiSU ==="
           
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
-          
-          cd KernelSU
-          git checkout 5b76b884
-          cd ..
           
           echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
