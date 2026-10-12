@@ -129,24 +129,6 @@ jobs:
             git checkout ${{ env.KERNEL_COMMIT }}
           fi
 
-      - name: Apply Scheduler Tuning (PELT)
-        run: |
-          cd work/common
-
-          echo "=== 1. Apply Custom CPU & Scheduler Config Flags ==="
-          cat << 'EOF_SCHED' >> arch/arm64/configs/gki_defconfig
-          CONFIG_ENERGY_MODEL=y
-          CONFIG_CPU_FREQ=y
-          CONFIG_SMP=y
-          CONFIG_SCHED_MC=y
-          CONFIG_SCHED_TOPOLOGY=y
-          CONFIG_CPU_THERMAL=y
-          EOF_SCHED
-
-          echo "=== 2. Configure PELT Halflife to 32ms ==="
-          sed -i '/CONFIG_PELT_UTIL_HALFLIFE_16=y/d' arch/arm64/configs/gki_defconfig
-          echo "CONFIG_PELT_UTIL_HALFLIFE_32=y" >> arch/arm64/configs/gki_defconfig
-
       - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
         run: |
           cd work/common
