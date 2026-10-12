@@ -141,12 +141,6 @@ jobs:
           CONFIG_SCHED_MC=y
           CONFIG_SCHED_TOPOLOGY=y
           CONFIG_CPU_THERMAL=y
-          CONFIG_CGROUPS=y
-          CONFIG_CGROUP_SCHED=y
-          CONFIG_FAIR_GROUP_SCHED=y
-          CONFIG_CPU_FREQ_THERMAL=y
-          CONFIG_SCHED_CASS=y
-          CONFIG_CASS=y
           EOF_SCHED
 
           echo "=== 2. Configure PELT Halflife to 32ms ==="
