@@ -323,7 +323,7 @@ jobs:
 
       - name: Fail-Safe Repack with Stock boot.img Parameters & Secure AVB Signature 🔒
         env:
-          BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/kbab10wgkhvefps1yzufb/Lineageboot.img?rlkey=suimcc9dxjnwcf7007lepndri&st=lt92ei67&dl=1"
+          BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/16oax1feqzx2z9spqkudy/Shinkaiboot.img?rlkey=3fuh9bgja0djrsmutg2rvqo6a&st=cw6rafsz&dl=1"
         shell: bash
         run: |
           echo "=== 1. Download official STABLE gki toolchain modules ==="
