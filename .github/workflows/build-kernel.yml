@@ -287,36 +287,78 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Setting up ReSukiSU
+      - name: Setting up ReSukiSU (Latest Branch Auto-Detect with Renovate)
         run: |
           cd work/common
-          echo "=== Setting up ReSukiSU ==="
+          echo "=== 1. Detecting Baka-SU branch with the latest commit ==="
+
+          # Metadata clone करके सभी branches की commit dates निकालना
+          git clone --bare --filter=blob:none https://github.com/Baka-SU/BakaSU.git bakasu_temp
+          cd bakasu_temp
+
+          # Renovate ब्रांचेस अब INCLUDED हैं (सिर्फ भाषा अनुवाद वाले weblate को छोड़ा गया है)
+          LATEST_BAKASU_BRANCH=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | grep -v -E '^weblate' | head -n 1)
           
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
-          
-          # Force stable commit to fix susfs_compat mk error
+          LATEST_BAKASU_COMMIT=$(git rev-parse "refs/heads/$LATEST_BAKASU_BRANCH")
+          COMMIT_DESC=$(git log -1 --pretty=format:"%s (%cr)" "$LATEST_BAKASU_COMMIT")
+
+          echo "🎯 Selected Branch: $LATEST_BAKASU_BRANCH"
+          echo "📌 Commit SHA: $LATEST_BAKASU_COMMIT"
+          echo "📝 Last Update: $COMMIT_DESC"
+
+          cd ..
+          rm -rf bakasu_temp
+
+          # Environment variables में सेव करना ताकि Release Notes में दिखे
+          echo "DETECTED_BAKASU_BRANCH=$LATEST_BAKASU_BRANCH" >> $GITHUB_ENV
+          echo "DETECTED_BAKASU_COMMIT=$LATEST_BAKASU_COMMIT" >> $GITHUB_ENV
+
+          echo "=== 2. Running setup.sh for branch: $LATEST_BAKASU_BRANCH ==="
+          # अगर ब्रांच में setup.sh न मिले तो main से fallback करेगा
+          SETUP_URL="https://raw.githubusercontent.com/Baka-SU/BakaSU/${LATEST_BAKASU_BRANCH}/kernel/setup.sh"
+          if ! curl --head --silent --fail "$SETUP_URL" > /dev/null; then
+             echo "⚠️ setup.sh not directly reachable on $LATEST_BAKASU_BRANCH, using main setup.sh..."
+             SETUP_URL="https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh"
+          fi
+          curl -LSs "$SETUP_URL" | bash -s "${LATEST_BAKASU_BRANCH}"
+
+          # KernelSU को strictly detected renovate/latest ब्रांच और कमिट पर स्विच करना
           cd KernelSU
-          git checkout 5b76b884
+          git fetch origin
+          git checkout "$LATEST_BAKASU_BRANCH" || git checkout -b "$LATEST_BAKASU_BRANCH" "origin/$LATEST_BAKASU_BRANCH"
+          git reset --hard "$LATEST_BAKASU_COMMIT"
           cd ..
           
-          echo "CONFIG_KSU_SENTINEL=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" >> arch/arm64/configs/gki_defconfig
-          echo "✅ ReSukiSU + SuSFS applied successfully!"
+          echo "=== 3. Adding Defconfig Options (SuSFS v2.3.0 + Experimental) ==="
+          cat << 'EOF' >> arch/arm64/configs/gki_defconfig
+          # Master Switch
+          CONFIG_KSU=y
+          CONFIG_KSU_SENTINEL=y
+          CONFIG_KSU_SUSFS=y
+
+          # Core Stealth & Spoofing (Standard v2.3.0)
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=n
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+
+          # Experimental Features
+          CONFIG_KSU_SUSFS_SUS_MEMFD=y
+          CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
+          EOF
+
+          echo "✅ BakaSU ($LATEST_BAKASU_BRANCH @ $LATEST_BAKASU_COMMIT) applied successfully!"
 
       - name: Absolute Stealth (Dynamic UTS_RELEASE Injection)
         run: |
@@ -483,6 +525,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with bakaSU, SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (${DETECTED_BAKASU_BRANCH:-main} @ ${DETECTED_BAKASU_COMMIT:0:8}), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
