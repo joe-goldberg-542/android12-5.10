@@ -287,12 +287,17 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Setting up KernelSU-Next
+      - name: Setting up ReSukiSU
         run: |
           cd work/common
-          echo "=== Setting up KernelSU-Next ==="
+          echo "=== Setting up ReSukiSU ==="
           
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
+          
+          # Force stable commit to fix susfs_compat mk error
+          cd KernelSU
+          git checkout 5b76b884
+          cd ..
           
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           # Master Switch
@@ -322,7 +327,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
 
-          echo "✅ KernelSU-Next + SuSFS applied successfully!"
+          echo "✅ ReSukiSU + SuSFS applied successfully!"
 
       - name: Absolute Stealth (Dynamic UTS_RELEASE Injection)
         run: |
@@ -489,6 +494,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with KernelSU-Next, SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU, SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
