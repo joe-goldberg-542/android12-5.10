@@ -294,6 +294,11 @@ jobs:
           
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
           
+          # Force stable commit to fix susfs_compat mk error
+          cd KernelSU
+          git checkout 5b76b884
+          cd ..
+          
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           # Master Switch
           CONFIG_KSU=y
