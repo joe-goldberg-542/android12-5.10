@@ -287,34 +287,42 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Setting up ReSukiSU (Latest Branch Auto-Detect with Renovate)
+      - name: Setting up ReSukiSU (Smart SuSFS-Compatible Latest Branch + Auto-Merge)
         run: |
           cd work/common
-          echo "=== 1. Detecting Baka-SU branch with the latest commit ==="
+          echo "=== 1. Detecting latest SuSFS-compatible Baka-SU branch ==="
 
-          # Metadata clone करके सभी branches की commit dates निकालना
           git clone --bare --filter=blob:none https://github.com/Baka-SU/BakaSU.git bakasu_temp
           cd bakasu_temp
 
-          # Renovate ब्रांचेस अब INCLUDED हैं (सिर्फ भाषा अनुवाद वाले weblate को छोड़ा गया है)
-          LATEST_BAKASU_BRANCH=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | grep -v -E '^weblate' | head -n 1)
-          
+          ALL_RECENT_BRANCHES=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | grep -v -E '^weblate')
+          SELECTED_BRANCH=""
+
+          for branch in $ALL_RECENT_BRANCHES; do
+            if git show "refs/heads/$branch:kernel/tools/susfs_compat.mk" 2>/dev/null | grep -q "Please wait susfs update"; then
+              echo "⏭️ Skipping '$branch' as primary base (SuSFS blocker present in this branch)"
+              continue
+            fi
+            SELECTED_BRANCH="$branch"
+            break
+          done
+
+          if [ -z "$SELECTED_BRANCH" ]; then
+            SELECTED_BRANCH="sync-susfs"
+          fi
+
+          LATEST_BAKASU_BRANCH="$SELECTED_BRANCH"
           LATEST_BAKASU_COMMIT=$(git rev-parse "refs/heads/$LATEST_BAKASU_BRANCH")
           COMMIT_DESC=$(git log -1 --pretty=format:"%s (%cr)" "$LATEST_BAKASU_COMMIT")
 
-          echo "🎯 Selected Branch: $LATEST_BAKASU_BRANCH"
+          echo "🎯 Selected Primary SuSFS-Ready Branch: $LATEST_BAKASU_BRANCH"
           echo "📌 Commit SHA: $LATEST_BAKASU_COMMIT"
           echo "📝 Last Update: $COMMIT_DESC"
 
           cd ..
           rm -rf bakasu_temp
 
-          # Environment variables में सेव करना ताकि Release Notes में दिखे
-          echo "DETECTED_BAKASU_BRANCH=$LATEST_BAKASU_BRANCH" >> $GITHUB_ENV
-          echo "DETECTED_BAKASU_COMMIT=$LATEST_BAKASU_COMMIT" >> $GITHUB_ENV
-
           echo "=== 2. Running setup.sh for branch: $LATEST_BAKASU_BRANCH ==="
-          # अगर ब्रांच में setup.sh न मिले तो main से fallback करेगा
           SETUP_URL="https://raw.githubusercontent.com/Baka-SU/BakaSU/${LATEST_BAKASU_BRANCH}/kernel/setup.sh"
           if ! curl --head --silent --fail "$SETUP_URL" > /dev/null; then
              echo "⚠️ setup.sh not directly reachable on $LATEST_BAKASU_BRANCH, using main setup.sh..."
@@ -322,12 +330,32 @@ jobs:
           fi
           curl -LSs "$SETUP_URL" | bash -s "${LATEST_BAKASU_BRANCH}"
 
-          # KernelSU को strictly detected renovate/latest ब्रांच और कमिट पर स्विच करना
           cd KernelSU
           git fetch origin
           git checkout "$LATEST_BAKASU_BRANCH" || git checkout -b "$LATEST_BAKASU_BRANCH" "origin/$LATEST_BAKASU_BRANCH"
           git reset --hard "$LATEST_BAKASU_COMMIT"
+
+          # Newer unmerged branches (jaise luyanci-patch-1 ya main) ko safely merge karna
+          for branch in $ALL_RECENT_BRANCHES; do
+            if [ "$branch" = "$LATEST_BAKASU_BRANCH" ]; then
+              break
+            fi
+            echo "🔄 Trying to merge newer unmerged branch 'origin/$branch' into '$LATEST_BAKASU_BRANCH'..."
+            if git merge --no-commit --no-ff "origin/$branch" 2>/dev/null; then
+              git checkout "$LATEST_BAKASU_COMMIT" -- kernel/tools/susfs_compat.mk 2>/dev/null || true
+              git commit -m "Merge branch '$branch' into $LATEST_BAKASU_BRANCH" || true
+              echo "✅ Merged '$branch' cleanly!"
+            else
+              echo "⚠️ Merge conflict with '$branch', skipping auto-merge for this branch."
+              git merge --abort 2>/dev/null || true
+            fi
+          done
+
+          FINAL_COMMIT=$(git rev-parse HEAD)
           cd ..
+
+          echo "DETECTED_BAKASU_BRANCH=$LATEST_BAKASU_BRANCH" >> $GITHUB_ENV
+          echo "DETECTED_BAKASU_COMMIT=$FINAL_COMMIT" >> $GITHUB_ENV
           
           echo "=== 3. Adding Defconfig Options (SuSFS v2.3.0 + Experimental) ==="
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
@@ -358,7 +386,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
 
-          echo "✅ BakaSU ($LATEST_BAKASU_BRANCH @ $LATEST_BAKASU_COMMIT) applied successfully!"
+          echo "✅ BakaSU ($LATEST_BAKASU_BRANCH @ $FINAL_COMMIT) applied successfully!"
 
       - name: Absolute Stealth (Dynamic UTS_RELEASE Injection)
         run: |
