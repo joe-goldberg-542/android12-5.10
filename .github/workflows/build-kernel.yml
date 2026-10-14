@@ -86,19 +86,19 @@ jobs:
           fi
           df -h
 
-      - name: Install Dependencies
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
           pip install lxml
 
-      - name: Configure Git
+      - name: Configure Git Identity
         run: |
           git config --global --add safe.directory "*"
           git config --global user.email "joe_goldberg_542@protonmail.com"
           git config --global user.name "joe-goldberg-542"
 
-      - name: Restore Compiler Cache
+      - name: Restore ccache
         if: ${{ inputs.ccache }}
         uses: actions/cache@v4
         with:
@@ -109,7 +109,7 @@ jobs:
             cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-
           fail-on-cache-miss: false
 
-      - name: Configure Swap Space
+      - name: Allocate 15GB Swap
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
@@ -129,7 +129,7 @@ jobs:
             git checkout ${{ env.KERNEL_COMMIT }}
           fi
 
-      - name: Restore Base Kernel Version
+      - name: Restore 5.10.271 Version
         run: |
           cd work/common
           if ! git revert --no-edit 9be64aa501c6ac85a21b9860875cf1c6aa9cd6d2; then
@@ -233,7 +233,7 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
 
-      - name: Integrate SUSFS
+      - name: Integrate SuSFS
         run: |
           cd work/common
           git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
@@ -246,7 +246,7 @@ jobs:
           cd work/common
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
           
-          cd BakaSU
+          cd KernelSU
           git checkout 5b76b884
           cd ..
           
@@ -273,7 +273,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
 
-      - name: Configure Kernel Release String
+      - name: Lock UTS_RELEASE Version
         run: |
           cd work/common
           K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
@@ -289,7 +289,7 @@ jobs:
           echo "#!/bin/sh" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-      - name: Setup Toolchain
+      - name: Setup Neutron Clang
         if: ${{ inputs.clang_version == 'neutron clang 24' }}
         run: |
           mkdir -p $GITHUB_WORKSPACE/neutron-clang
@@ -306,7 +306,7 @@ jobs:
           echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
           
-      - name: Compile Kernel
+      - name: Build Kernel
         run: |
           chmod +x ./build-kernel.sh
           ./build-kernel.sh ${{ inputs.ccache && '--ccache' || '' }}
@@ -392,7 +392,7 @@ jobs:
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
           
-      - name: Save Compiler Cache
+      - name: Save ccache
         if: ${{ inputs.ccache && always() }}
         uses: actions/cache/save@v4
         with:
