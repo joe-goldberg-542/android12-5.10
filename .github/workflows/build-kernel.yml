@@ -203,6 +203,49 @@ jobs:
             echo "ℹ️ No le9uo commits found. Skipping."
           fi
 
+      - name: Apply Custom Patches
+        run: |
+          cd work/common
+          echo "=== Applying Custom Patches ==="
+
+          PATCH_DIRS=(
+            "$GITHUB_WORKSPACE/.github/workflows/patches"
+            "$GITHUB_WORKSPACE/patches"
+          )
+
+          shopt -s nullglob
+          APPLIED_COUNT=0
+
+          for dir in "${PATCH_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "--> Checking patches in: $dir"
+              for patch_file in "$dir"/*.patch; do
+                echo "=========================================="
+                echo "--> Applying patch: $(basename "$patch_file")"
+                if git apply --check "$patch_file" 2>/dev/null; then
+                  git apply "$patch_file"
+                  echo "✅ Applied cleanly with git apply: $(basename "$patch_file")"
+                elif git apply --3way "$patch_file" 2>/dev/null; then
+                  echo "✅ Applied with 3-way merge: $(basename "$patch_file")"
+                elif patch -p1 --forward --fuzz=3 < "$patch_file"; then
+                  echo "✅ Applied with patch -p1 (fuzz=3): $(basename "$patch_file")"
+                else
+                  echo "::error:: ❌ Failed to apply patch: $(basename "$patch_file")"
+                  exit 1
+                fi
+                APPLIED_COUNT=$((APPLIED_COUNT + 1))
+              done
+            fi
+          done
+
+          if [ "$APPLIED_COUNT" -eq 0 ]; then
+            echo "ℹ️ No .patch files found to apply."
+          else
+            git add -A
+            git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
+            echo "✅ Successfully applied and committed $APPLIED_COUNT patch(es)!"
+          fi
+
       - name: Clean Hardcoded NoMount & Integrate Official NoMount (Method 3 - Dev Branch)
         run: |
           cd work/common
