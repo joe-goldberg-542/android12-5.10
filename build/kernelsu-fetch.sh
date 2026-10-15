@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fetch the ksud (BakaSU) binaries the flashable zip needs to replace the kernel on
-# device. BakaSU is built into the kernel source itself, so no
+# Fetch the ksud (FinaSU) binaries the flashable zip needs to replace the kernel on
+# device. FinaSU is built into the kernel source itself, so no
 # kernelsu.ko LKM or ksuinit ramdisk component is required anymore: ksud's
 # `boot-patch --no-install` swaps only the kernel image.
 #
@@ -17,10 +17,10 @@ set -euo pipefail
 
 SCRIPT_NAME=${0##*/}
 
-# ==> SETTINGS FOR BAKASU INTEGRATION <==
-KSU_OWNER=${KSU_OWNER:-Baka-SU}
-KSU_REPO=${KSU_REPO:-BakaSU}
-KSU_BRANCH=${KSU_BRANCH:-main} # BakaSU uses 'main'
+# ==> SETTINGS FOR FINASU INTEGRATION <==
+KSU_OWNER=${KSU_OWNER:-LyraVoid}
+KSU_REPO=${KSU_REPO:-FinaSU}
+KSU_BRANCH=${KSU_BRANCH:-master} # FinaSU uses 'master'
 KSUD_TARGETS=${KSUD_TARGETS:-"aarch64-linux-android armv7-linux-androideabi"}
 KSU_PREBUILT_BASE=${KSU_PREBUILT_BASE:-}
 OUT_DIR=${OUT_DIR:-$PWD/kernelsu}
@@ -37,15 +37,15 @@ usage() {
     cat <<EOF
 Usage: ./$SCRIPT_NAME [options]
 
-Downloads the BakaSU binaries (arm64 + armv7) that patch a kernel into an
+Downloads the FinaSU binaries (arm64 + armv7) that patch a kernel into an
 existing boot image on device. Prefers durable prebuilt assets on
 KSU_PREBUILT_BASE; falls back to the latest successful GitHub Actions run
 (needs GITHUB_TOKEN).
 
 Environment:
-  KSU_OWNER          BakaSU repository owner (default: Baka-SU)
-  KSU_REPO           BakaSU repository repo (default: BakaSU)
-  KSU_BRANCH         Branch of the latest run (default: main)
+  KSU_OWNER          FinaSU repository owner (default: LyraVoid)
+  KSU_REPO           FinaSU repository repo (default: FinaSU)
+  KSU_BRANCH         Branch of the latest run (default: master)
   KSUD_TARGETS       Space-separated ksud Android targets (default:
                      aarch64-linux-android armv7-linux-androideabi)
   KSU_PREBUILT_BASE  Release base URL holding ksu-ksud-*.zip assets (optional)
