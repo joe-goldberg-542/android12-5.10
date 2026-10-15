@@ -161,7 +161,7 @@ jobs:
           gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
           echo "release $RELEASE_TAG updated"
 
-  bakasu:
+  finasu:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -169,7 +169,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Mirror flash tools (ksud/BakaSU) binaries
+      - name: Mirror flash tools (ksud/FinaSU) binaries
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -187,9 +187,9 @@ jobs:
               echo "missing assets: $missing"
             fi
           fi
-          ./build/kernelsu-mirror.sh
+          ./build/finasu-mirror.sh
 
-      - name: Publish BakaSU tools to prebuilts release
+      - name: Publish FinaSU tools to prebuilts release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -197,12 +197,12 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --latest=false \
               --title "Kernel build prebuilts" \
-              --notes "Prebuilt components consumed by build-kernel workflow: clang toolchain, kernel-build-tools, build-tools and mirrored BakaSU (ksud) flash binaries (arm64/armv7) to pack self-flashing boot kernels." || true
+              --notes "Prebuilt components consumed by build-kernel workflow: clang toolchain, kernel-build-tools, build-tools and mirrored FinaSU (ksud) flash binaries (arm64/armv7) to pack self-flashing boot kernels." || true
           fi
           assets=()
           for f in ksu-assets/ksu-*.zip; do
             [ -f "$f" ] && assets+=("$f")
           done
-          [ "${#assets[@]}" -gt 0 ] || { echo "no new BakaSU assets, nothing to upload"; exit 0; }
+          [ "${#assets[@]}" -gt 0 ] || { echo "no new FinaSU assets, nothing to upload"; exit 0; }
           gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
-          echo "uploaded ${#assets[@]} BakaSU assets to $RELEASE_TAG"
+          echo "uploaded ${#assets[@]} FinaSU assets to $RELEASE_TAG"
