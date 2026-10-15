@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_DEBUG=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
       ccache:
         description: 'Accelerate with ccache.'
         type: boolean
@@ -241,18 +241,30 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Integrate BakaSU
+      - name: Integrate FinaSU
         run: |
           cd work/common
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
-          
-          cd KernelSU
-          git checkout 5b76b884
+          rm -rf KernelSU FinaSU drivers/kernelsu
+          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+
+          git clone -b master https://github.com/LyraVoid/FinaSU.git FinaSU
+
+          cd FinaSU
+          echo "Building FinaSU at commit: $(git rev-parse --short HEAD)"
           cd ..
-          
+
+          ln -sf $(pwd)/FinaSU/kernel drivers/kernelsu
+
+          echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
-          CONFIG_KSU_SENTINEL=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_OVERLAY_FS=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
@@ -424,6 +436,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with BakaSU, SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with FinaSU (Latest), SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
