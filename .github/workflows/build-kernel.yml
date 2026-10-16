@@ -241,15 +241,17 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Integrate SukiSU-Ultra
+      - name: Integrate BakaSU
         run: |
           cd work/common
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
+          
+          cd KernelSU
+          git checkout 5b76b884
+          cd ..
           
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
-          CONFIG_KALLSYMS=y
-          CONFIG_KALLSYMS_ALL=y
           CONFIG_KSU_SENTINEL=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -422,6 +424,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with SukiSU-Ultra (builtin), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU, SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
