@@ -249,14 +249,24 @@ jobs:
           cd ..
 
           mkdir -p /tmp/finasu_ci
-          if gh api /repos/LyraVoid/FinaSU/actions/artifacts/12001768888/zip > /tmp/finasu_ci/artifact.zip 2>/dev/null; then
+          ARTIFACT_ID=$(gh api "/repos/LyraVoid/FinaSU/actions/artifacts?name=manager&per_page=10" \
+            --jq '.artifacts | map(select(.expired == false)) | .[0].id // empty' 2>/dev/null)
+
+          echo "Fetched Latest Manager Artifact ID: ${ARTIFACT_ID:-None}"
+
+          if [ -n "$ARTIFACT_ID" ] && gh api "/repos/LyraVoid/FinaSU/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/finasu_ci/artifact.zip 2>/dev/null; then
             unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          elif curl -fL "https://nightly.link/LyraVoid/FinaSU/actions/artifacts/12001768888.zip" -o /tmp/finasu_ci/artifact.zip; then
+          elif [ -n "$ARTIFACT_ID" ] && curl -fL "https://nightly.link/LyraVoid/FinaSU/actions/artifacts/$ARTIFACT_ID.zip" -o /tmp/finasu_ci/artifact.zip; then
             unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
+          elif curl -fL "https://nightly.link/LyraVoid/FinaSU/workflows/build/master/manager.zip" -o /tmp/finasu_ci/artifact.zip; then
+            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
+          else
+            echo "::warning::Could not download FinaSU Manager APK artifact."
           fi
 
           CI_APK=$(find /tmp/finasu_ci -name "*.apk" | head -n 1)
           if [ -n "$CI_APK" ] && [ -f "$CI_APK" ]; then
+            echo "Found APK: $CI_APK"
             cp "$CI_APK" "$GITHUB_WORKSPACE/FinaSU-Manager.apk"
           fi
 
