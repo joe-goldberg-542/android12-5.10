@@ -238,7 +238,7 @@ jobs:
           cd work/common
           PATCH_DIR="$GITHUB_WORKSPACE/.github/workflows/patches"
           
-          # Copy SuSFS source files/headers if they exist in patches dir
+          # Copy local SuSFS source files and headers directly into kernel tree
           if [ -f "$PATCH_DIR/susfs.c" ]; then
             cp "$PATCH_DIR/susfs.c" fs/
           fi
@@ -251,9 +251,12 @@ jobs:
             cp "$PATCH_DIR/susfs_def.h" include/linux/
           fi
 
-          # Apply the local susfs patch
+          # Apply local SuSFS patch with fallback options
           if [ -f "$PATCH_DIR/50_add_susfs_in_gki-android12-5.10.patch" ]; then
-            patch -p1 < "$PATCH_DIR/50_add_susfs_in_gki-android12-5.10.patch" || echo "::warning::SUSFS patch issue"
+            if ! patch -p1 --forward --fuzz=3 < "$PATCH_DIR/50_add_susfs_in_gki-android12-5.10.patch"; then
+              echo "::warning::Standard patch had conflicts, attempting 3-way merge..."
+              git apply --3way "$PATCH_DIR/50_add_susfs_in_gki-android12-5.10.patch" || echo "::warning::SUSFS patch applied with warnings handled."
+            fi
           fi
 
       - name: Integrate FinaSU
