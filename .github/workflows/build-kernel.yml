@@ -244,10 +244,11 @@ jobs:
       - name: Integrate BakaSU
         run: |
           cd work/common
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
           
           cd KernelSU
-          git checkout 5b76b884
+          git fetch origin sync-susfs
+          git checkout sync-susfs
           cd ..
           
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
@@ -424,6 +425,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with BakaSU, SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (sync-susfs), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
