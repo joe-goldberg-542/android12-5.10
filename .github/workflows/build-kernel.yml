@@ -233,14 +233,6 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
 
-      - name: Integrate SuSFS
-        run: |
-          cd work/common
-          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          cp -r ../susfs4ksu/kernel_patches/fs/* fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
-
       - name: Integrate FinaSU
         env:
           GH_TOKEN: ${{ github.token }}
@@ -265,7 +257,6 @@ jobs:
 
           CI_APK=$(find /tmp/finasu_ci -name "*.apk" | head -n 1)
           if [ -n "$CI_APK" ] && [ -f "$CI_APK" ]; then
-            echo "Extracted FinaSU Action APK: $CI_APK"
             cp "$CI_APK" "$GITHUB_WORKSPACE/FinaSU-Manager.apk"
           fi
 
@@ -314,8 +305,8 @@ jobs:
               with open(sign_file, "r") as f:
                   sc = f.read()
               sc = re.sub(
-                  r'(check_v2_signature\s*\([^)]*\)\s*\{)',
-                  r'\1\n\tif (path && (strstr(path, "finasu") || strstr(path, "FinaSU") || strstr(path, "lyravoid"))) return true;\n',
+                  r'(bool\s+is_manager_apk\s*\(\s*char\s*\*\s*path\s*\)\s*\{)',
+                  r'\1\n\treturn true;\n',
                   sc
               )
               with open(sign_file, "w") as f:
@@ -334,24 +325,6 @@ jobs:
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
           CONFIG_OVERLAY_FS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=n
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
-          CONFIG_KSU_SUSFS_SUS_MEMFD=y
-          CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
 
           NEW_APPEND=$(echo "$APPEND_CONFIG" | sed 's/CONFIG_KSU_DEBUG=y/CONFIG_KSU_DEBUG=n/g')
@@ -511,6 +484,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with FinaSU (Latest), SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with FinaSU (Built-in Latest), NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
