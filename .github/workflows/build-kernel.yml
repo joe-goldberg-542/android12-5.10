@@ -207,16 +207,6 @@ jobs:
             git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
           fi
 
-      - name: Integrate SuSFS
-        run: |
-          cd work/common
-          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          cp -r ../susfs4ksu/kernel_patches/fs/* fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || true
-          grep -q "susfs.o" fs/Makefile || echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
-          sed -i '/depends on KSU/d' fs/Kconfig
-
       - name: Integrate NoMount
         run: |
           cd work/common
@@ -321,7 +311,6 @@ jobs:
               )
               with open(sign_file, "w") as f:
                   f.write(sc)
-              print("Patched apk_sign.c:", sign_file)
           EOF
 
           ln -sf $(pwd)/FinaSU/kernel drivers/kernelsu
@@ -336,24 +325,6 @@ jobs:
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
           CONFIG_OVERLAY_FS=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=n
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
-          CONFIG_KSU_SUSFS_SUS_MEMFD=y
-          CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
 
           NEW_APPEND=$(echo "$APPEND_CONFIG" | sed 's/CONFIG_KSU_DEBUG=y/CONFIG_KSU_DEBUG=n/g')
@@ -513,6 +484,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with FinaSU (Built-in Latest), SuSFS, NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with FinaSU (Built-in Latest), NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
