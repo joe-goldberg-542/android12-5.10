@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
       ccache:
         description: 'Accelerate with ccache.'
         type: boolean
@@ -89,7 +89,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 unzip
+          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
           pip install lxml
 
       - name: Configure Git Identity
@@ -207,21 +207,6 @@ jobs:
             git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
           fi
 
-      - name: Integrate SuSFS
-        run: |
-          cd work/common
-          rm -rf ../susfs4ksu
-          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          cp -rf ../susfs4ksu/kernel_patches/fs/* fs/
-          cp -rf ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          if git apply --check ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch 2>/dev/null; then
-            git apply ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          elif git apply --3way ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch 2>/dev/null; then
-            echo "Applied SuSFS patch via 3-way merge"
-          else
-            patch -p1 --forward --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "::warning::SUSFS patch had some issues"
-          fi
-
       - name: Integrate NoMount
         run: |
           cd work/common
@@ -248,148 +233,41 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
 
-      - name: Integrate FinaSU
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Integrate SuSFS
         run: |
           cd work/common
-          rm -rf KernelSU FinaSU BakaSU drivers/kernelsu
-          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
-          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          cp -r ../susfs4ksu/kernel_patches/fs/* fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-          # 1. Clone FinaSU (Base)
-          git clone -b master https://github.com/LyraVoid/FinaSU.git FinaSU
-          cd FinaSU
-          echo "Base FinaSU commit: $(git rev-parse --short HEAD)"
-          cd ..
-
-          # 2. Clone BakaSU (sync-susfs branch) aur kernel/ + uapi/ FinaSU mein inject karein
-          git clone --depth=1 -b sync-susfs https://github.com/Baka-SU/BakaSU.git BakaSU
-          echo "Injecting BakaSU (sync-susfs) kernel driver at commit: $(git -C BakaSU rev-parse --short HEAD)"
+      - name: Integrate BakaSU
+        run: |
+          cd work/common
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
           
-          rm -rf FinaSU/kernel
-          cp -rf BakaSU/kernel FinaSU/kernel
-          if [ -d "BakaSU/uapi" ]; then
-            rm -rf FinaSU/uapi
-            cp -rf BakaSU/uapi FinaSU/uapi
-          fi
-          rm -rf BakaSU
-
-          # 3. FinaSU ka latest Manager APK artifact fetch aur extract karein
-          mkdir -p /tmp/finasu_ci
-          ARTIFACT_ID=$(gh api "/repos/LyraVoid/FinaSU/actions/artifacts?name=manager&per_page=10" \
-            --jq '.artifacts | map(select(.expired == false)) | .[0].id // empty' 2>/dev/null)
-
-          echo "Fetched Latest FinaSU Manager Artifact ID: ${ARTIFACT_ID:-None}"
-
-          if [ -n "$ARTIFACT_ID" ] && gh api "/repos/LyraVoid/FinaSU/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/finasu_ci/artifact.zip 2>/dev/null; then
-            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          elif [ -n "$ARTIFACT_ID" ] && curl -fL "https://nightly.link/LyraVoid/FinaSU/actions/artifacts/$ARTIFACT_ID.zip" -o /tmp/finasu_ci/artifact.zip; then
-            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          elif curl -fL "https://nightly.link/LyraVoid/FinaSU/workflows/build/master/manager.zip" -o /tmp/finasu_ci/artifact.zip; then
-            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          else
-            echo "::warning::Could not download FinaSU Manager APK artifact."
-          fi
-
-          find /tmp/finasu_ci -maxdepth 1 -name "*.zip" ! -name "artifact.zip" -exec unzip -q -o {} -d /tmp/finasu_ci/ \;
-
-          CI_APK=$(find /tmp/finasu_ci -name "*.apk" | head -n 1)
-          if [ -n "$CI_APK" ] && [ -f "$CI_APK" ]; then
-            echo "Found APK: $CI_APK"
-            cp "$CI_APK" "$GITHUB_WORKSPACE/FinaSU-Manager.apk"
-          fi
-
-          # 4. FinaSU APK ka signature BakaSU ke injected kernel/Kbuild & apk_sign.c me sync karein
-          python3 - << 'EOF'
-          import os, re, struct, hashlib, glob
-
-          apk_path = os.path.expandvars("$GITHUB_WORKSPACE/FinaSU-Manager.apk")
-          expected_size = None
-          expected_hash = None
-
-          if os.path.exists(apk_path):
-              with open(apk_path, "rb") as f:
-                  data = f.read()
-              eocd = data.rfind(b"PK\x05\x06")
-              if eocd != -1:
-                  cd_offset = struct.unpack("<I", data[eocd+16:eocd+20])[0]
-                  if data[cd_offset-16:cd_offset] == b"APK Sig Block 42":
-                      block_size = struct.unpack("<Q", data[cd_offset-24:cd_offset-16])[0]
-                      pos = cd_offset - block_size
-                      while pos < cd_offset - 24:
-                          pair_len = struct.unpack("<Q", data[pos:pos+8])[0]
-                          pair_id = struct.unpack("<I", data[pos+8:pos+12])[0]
-                          if pair_id in (0x7109871a, 0xf05368c0):
-                              val = data[pos+12:pos+8+pair_len]
-                              digests_len = struct.unpack("<I", val[12:16])[0]
-                              certs_off = 16 + digests_len
-                              cert_len = struct.unpack("<I", val[certs_off+4:certs_off+8])[0]
-                              cert_bytes = val[certs_off+8:certs_off+8+cert_len]
-                              expected_size = f"0x{cert_len:04x}"
-                              expected_hash = hashlib.sha256(cert_bytes).hexdigest()
-                              break
-                          pos += 8 + pair_len
-
-          if expected_size and expected_hash:
-              print(f"Syncing FinaSU CI APK Signature -> size: {expected_size}, hash: {expected_hash}")
-              for kfile in ["FinaSU/kernel/Kbuild", "FinaSU/kernel/Makefile"]:
-                  if os.path.exists(kfile):
-                      with open(kfile, "r") as f:
-                          content = f.read()
-                      content = re.sub(r'0x0*33b', expected_size, content)
-                      content = re.sub(r'c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6', expected_hash, content)
-                      content = re.sub(r'(KSU_EXPECTED_SIZE\s*:?=\s*)0x[0-9a-fA-F]+', rf'\g<1>{expected_size}', content)
-                      content = re.sub(r'(KSU_EXPECTED_HASH\s*:?=\s*)[0-9a-fA-F]{64}', rf'\g<1>{expected_hash}', content)
-                      with open(kfile, "w") as f:
-                          f.write(content)
-
-          for sign_file in glob.glob("FinaSU/kernel/**/apk_sign.c", recursive=True):
-              with open(sign_file, "r") as f:
-                  sc = f.read()
-              sc = re.sub(
-                  r'(bool\s+is_manager_apk\s*\(\s*char\s*\*\s*path\s*\)\s*\{)',
-                  r'\1\n\treturn true;\n',
-                  sc
-              )
-              with open(sign_file, "w") as f:
-                  f.write(sc)
-          EOF
-
-          ln -sf $(pwd)/FinaSU/kernel drivers/kernelsu
-
-          echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-
-          # 5. KSU + SUSFS Configs enable karein
+          cd KernelSU
+          git fetch origin sync-susfs
+          git checkout sync-susfs
+          cd ..
+          
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
-          CONFIG_KSU_DEBUG=n
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
-          CONFIG_OVERLAY_FS=y
-          EOF
-
-          if [ -f "include/linux/susfs.h" ] || [ -f "fs/susfs.c" ]; then
-            echo "Base Kernel SUSFS detected! Enabling CONFIG_KSU_SUSFS..."
-            cat << 'EOF' >> arch/arm64/configs/gki_defconfig
+          CONFIG_KSU_SENTINEL=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=n
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_INLINE_HOOK=y
+          CONFIG_KSU_SUSFS_SUS_MEMFD=y
+          CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
-          else
-            echo "::warning::fs/susfs.c not found in kernel source! Keeping CONFIG_KSU_SUSFS disabled to prevent build failure."
-          fi
-
-          NEW_APPEND=$(echo "$APPEND_CONFIG" | sed 's/CONFIG_KSU_DEBUG=y/CONFIG_KSU_DEBUG=n/g')
-          echo "APPEND_CONFIG=$NEW_APPEND" >> $GITHUB_ENV
 
       - name: Lock UTS_RELEASE Version
         run: |
@@ -509,9 +387,6 @@ jobs:
             --algorithm SHA256_RSA2048
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
-          if [ -f "$GITHUB_WORKSPACE/FinaSU-Manager.apk" ]; then
-            cp "$GITHUB_WORKSPACE/FinaSU-Manager.apk" "$GITHUB_WORKSPACE/work/dist/FinaSU-Manager.apk"
-          fi
           
       - name: Save ccache
         if: ${{ inputs.ccache && always() }}
@@ -534,7 +409,7 @@ jobs:
           pkg="$GITHUB_WORKSPACE/work/pkg"
           mkdir -p "$pkg"
           assets=()
-          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img FinaSU-Manager.apk; do
+          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img; do
             [ -f "$f" ] && assets+=("$f")
           done
           tar -I 'zstd -T0' -cf "$pkg/kernel-dist.tar.zst" .
@@ -545,6 +420,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with FinaSU (BakaSU SuSFS Driver + Latest FinaSU Manager), SuSFS, NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (sync-susfs), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
