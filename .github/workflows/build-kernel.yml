@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_DYNAMIC_MANAGER=y,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
       ccache:
         description: 'Accelerate with ccache.'
         type: boolean
@@ -89,7 +89,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 rsync
+          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
           pip install lxml
 
       - name: Configure Git Identity
@@ -221,7 +221,6 @@ jobs:
           sed -i '/nomount/d' fs/readdir.c 2>/dev/null || true
           sed -i '/nomount/d' fs/proc/task_mmu.c 2>/dev/null || true
 
-          rm -rf ../nomount
           git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git ../nomount
 
           sed -i '$i source "fs/nomount/Kconfig"' fs/Kconfig
@@ -234,16 +233,6 @@ jobs:
             cp -rf ../nomount/src/* fs/nomount/
           fi
 
-          if [ ! -f "fs/nomount/Kconfig" ]; then
-            cat << 'EOF' > fs/nomount/Kconfig
-          config NOMOUNT
-          	tristate "NoMount VFS redirection support"
-          	default y
-          	help
-          	  Enable NoMount VFS path redirection and directory iteration.
-          EOF
-          fi
-
       - name: Integrate SuSFS
         run: |
           cd work/common
@@ -252,106 +241,19 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Integrate FinaSU (dev)
+      - name: Integrate BakaSU
         run: |
           cd work/common
-          rm -rf KernelSU drivers/kernelsu
-          # Clone full commit history so Kbuild calculates KSU_GIT_VERSION (30000 + commit count)
-          git clone -b dev https://github.com/LyraVoid/FinaSU.git KernelSU
-
-          ln -sf "$(pwd)/KernelSU/kernel" drivers/kernelsu
-
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-          fi
-
-          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
-            sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          fi
-
-          # Export UAPI headers using a temporary O= directory so work/common stays 100% clean for out-of-tree GKI build
-          rm -rf /tmp/hdr_obj /tmp/ksu_uapi
-          make ARCH=arm64 O=/tmp/hdr_obj headers_install INSTALL_HDR_PATH=/tmp/ksu_uapi/usr
-          rm -rf /tmp/hdr_obj
-          make mrproper
-
-          sed -i 's|KSU_UAPI_INC := $(objtree)/usr/include|KSU_UAPI_INC := /tmp/ksu_uapi/usr/include|' KernelSU/kernel/Kbuild
-          sed -i 's/KSU_RUNNER_CFLAGS := $(CLANG_FLAGS)/KSU_RUNNER_CFLAGS := --target=aarch64-linux-gnu $(CLANG_FLAGS)/' KernelSU/kernel/Kbuild
-
-          # Inject SUSFS Kconfig declarations into FinaSU's Kconfig so kernel-side SUSFS symbols remain enabled
-          sed -i '/^endmenu/d' KernelSU/kernel/Kconfig
-          cat << 'EOF' >> KernelSU/kernel/Kconfig
-
-          config KSU_SUSFS
-          	bool "KernelSU addon - SUSFS"
-          	depends on KSU
-          	default y
-
-          config KSU_SUSFS_SUS_PATH
-          	bool "Enable to hide suspicious path"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SUS_MOUNT
-          	bool "Enable to hide suspicious mounts"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SUS_KSTAT
-          	bool "Enable to spoof suspicious kstat"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SPOOF_UNAME
-          	bool "Enable to spoof uname"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_ENABLE_LOG
-          	bool "Enable logging susfs messages in kernel"
-          	depends on KSU_SUSFS
-          	default n
-
-          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-          	bool "Enable to automatically hide ksu and susfs symbols from /proc/kallsyms"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          	bool "Enable to spoof /proc/bootconfig or /proc/cmdline"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_OPEN_REDIRECT
-          	bool "Enable to redirect a path to be opened with another path"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SUS_MAP
-          	bool "Enable to hide some mmapped real file from different proc maps interfaces"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SUS_MEMFD
-          	bool "Enable to hide or spoof memfd"
-          	depends on KSU_SUSFS
-          	default y
-
-          config KSU_SUSFS_SUS_PROC_FD_LINK
-          	bool "Enable to spoof /proc/self/fd/ links"
-          	depends on KSU_SUSFS
-          	default y
-
-          endmenu
-          EOF
-
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
+          
+          cd KernelSU
+          git fetch origin sync-susfs
+          git checkout sync-susfs
+          cd ..
+          
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
-          CONFIG_KSU_DEBUG=n
-          CONFIG_KSU_DYNAMIC_MANAGER=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
+          CONFIG_KSU_SENTINEL=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
@@ -362,10 +264,10 @@ jobs:
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_INLINE_HOOK=y
           CONFIG_KSU_SUSFS_SUS_MEMFD=y
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
-
 
       - name: Lock UTS_RELEASE Version
         run: |
@@ -396,6 +298,8 @@ jobs:
           ./antman --patch=glibc
           
           echo "$GITHUB_WORKSPACE/neutron-clang/bin" >> $GITHUB_PATH
+          echo "CC=ccache clang" >> $GITHUB_ENV
+          echo "CXX=ccache clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
           
       - name: Build Kernel
@@ -516,6 +420,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with FinaSU (dev), SuSFS, and NoMount (dev). $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (sync-susfs), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
