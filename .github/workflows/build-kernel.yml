@@ -241,14 +241,45 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
 
-      - name: Integrate BakaSU
+      - name: Integrate BakaSU (Merge Selected Branches)
         run: |
           cd work/common
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
           
           cd KernelSU
-          git fetch origin sync-susfs
-          git checkout sync-susfs
+          git config user.email "joe_goldberg_542@protonmail.com"
+          git config user.name "joe-goldberg-542"
+          
+          git fetch origin --prune
+          git checkout main
+          
+          BRANCHES=(
+            "sync-susfs"
+            "sync-upstream"
+            "refine-flash"
+            "renovate/maven-group-in-manager"
+            "renovate/gradle-9.x"
+          )
+          
+          for branch in "${BRANCHES[@]}"; do
+            echo "=========================================="
+            echo "Merging origin/$branch into main..."
+            ACTUAL_BRANCH=$(git branch -r | grep -i "origin/$branch$" | sed 's/origin\///' | tr -d ' ' | head -n 1)
+            
+            if [ -n "$ACTUAL_BRANCH" ]; then
+              if git merge --no-edit "origin/$ACTUAL_BRANCH"; then
+                echo "Successfully merged $ACTUAL_BRANCH"
+              elif git merge --no-edit -X theirs "origin/$ACTUAL_BRANCH"; then
+                echo "Merged $ACTUAL_BRANCH using auto-conflict resolution (-X theirs)"
+              else
+                echo "::warning::Conflict in $ACTUAL_BRANCH could not be auto-resolved, skipping..."
+                git merge --abort || true
+              fi
+            else
+              echo "::warning::Branch $branch not found on remote!"
+            fi
+          done
+          
           cd ..
           
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
@@ -268,6 +299,109 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MEMFD=y
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
+
+      - name: Setup JDK 21 for Stealth Manager APK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Custom Stealth BakaSU Manager & Patch Kernel Cert
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" "build-tools;35.0.0" "platforms;android-35"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          
+          rustup default stable
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk
+          
+          cd work/common/KernelSU
+          
+          # 1. Spoof Package Name, App Label, and Native Payload Name
+          NEW_PKG="com.sys.CoreService.auto"
+          NEW_LABEL="Core Service"
+          
+          find manager/ -type f \( -name "*.gradle*" -o -name "*.xml" -o -name "*.kt" -o -name "*.java" \) \
+            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g" {} +
+          find manager/ -type f \( -name "*.gradle*" -o -name "*.xml" \) \
+            -exec sed -i 's/applicationIdSuffix.*"//g' {} +
+            
+          find manager/ -type f -name "strings.xml" \
+            -exec sed -i "s/>BakaSU[^<]*</>$NEW_LABEL</g; s/>ReSukiSU[^<]*</>$NEW_LABEL</g; s/>KernelSU[^<]*</>$NEW_LABEL</g" {} +
+            
+          find manager/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" \) \
+            -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
+
+          # 2. Build ksud daemon for arm64 and place as libsysutils.so
+          cargo ndk -t arm64-v8a -p 31 build --release --manifest-path userspace/ksud/Cargo.toml
+          mkdir -p manager/app/src/main/jniLibs/arm64-v8a
+          cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
+
+          # 3. Generate Fresh Keystore & Build Manager APK
+          cd manager
+          keytool -genkeypair -v \
+            -keystore custom.jks \
+            -alias stealthkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass 123456 -keypass 123456 \
+            -dname "CN=Android, OU=System, O=OEM, L=Local, S=Local, C=US"
+
+          chmod +x gradlew
+          ./gradlew assembleRelease -x lint -x test || ./gradlew assembleDebug -x lint -x test
+
+          BUILT_APK=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
+
+          $ZIPALIGN -f -p 4 "$BUILT_APK" aligned.apk
+          $APKSIGNER sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
+
+          mkdir -p "$GITHUB_WORKSPACE/work/dist"
+          cp StealthManager.apk "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
+
+          # 4. Extract Certificate Size & SHA256 Hash for Kernel Verification
+          python3 - << 'EOF'
+          import hashlib, subprocess
+
+          subprocess.run([
+              "keytool", "-exportcert",
+              "-keystore", "custom.jks",
+              "-alias", "stealthkey",
+              "-storepass", "123456",
+              "-file", "cert.der"
+          ], check=True)
+
+          with open("cert.der", "rb") as f:
+              cert_data = f.read()
+
+          size = hex(len(cert_data))
+          sha256 = hashlib.sha256(cert_data).hexdigest()
+
+          print(f"Extracted KSU_EXPECTED_SIZE={size}")
+          print(f"Extracted KSU_EXPECTED_HASH={sha256}")
+
+          with open("../kernel_cert_env.txt", "w") as out:
+              out.write(f"KSU_EXPECTED_SIZE={size}\n")
+              out.write(f"KSU_EXPECTED_HASH={sha256}\n")
+          EOF
+
+          # 5. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
+          cd ..
+          source kernel_cert_env.txt
+          
+          find kernel/ -type f \( -name "*.c" -o -name "*.h" \) \
+            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g" {} +
+
+          if [ -f "kernel/Kbuild" ]; then
+            echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Kbuild
+            echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Kbuild
+          elif [ -f "kernel/Makefile" ]; then
+            echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Makefile
+            echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Makefile
+          fi
 
       - name: Lock UTS_RELEASE Version
         run: |
@@ -409,7 +543,7 @@ jobs:
           pkg="$GITHUB_WORKSPACE/work/pkg"
           mkdir -p "$pkg"
           assets=()
-          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img; do
+          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img StealthManager.apk; do
             [ -f "$f" ] && assets+=("$f")
           done
           tar -I 'zstd -T0' -cf "$pkg/kernel-dist.tar.zst" .
@@ -420,6 +554,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with BakaSU (sync-susfs), SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with Merged BakaSU (5 branches) + Stealth Manager (Core Service) + SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
