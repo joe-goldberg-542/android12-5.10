@@ -315,8 +315,9 @@ jobs:
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           
-          rustup default stable
-          rustup target add aarch64-linux-android
+          # Switch to nightly toolchain required by BakaSU ksud
+          rustup default nightly
+          rustup target add aarch64-linux-android --toolchain nightly
           
           # Fix C++ standard library linking for mkbootfs in ksud build.rs
           cd work/common/KernelSU/userspace/ksud
@@ -327,7 +328,7 @@ jobs:
           export CXXFLAGS="-stdlib=libc++"
           export LDFLAGS="-lc++_shared -lc++abi"
           
-          cargo build --target aarch64-linux-android --release
+          cargo +nightly build --target aarch64-linux-android --release
           cd ../../..
           
           # 1. Spoof Package Name, App Label, and Native Payload Name
