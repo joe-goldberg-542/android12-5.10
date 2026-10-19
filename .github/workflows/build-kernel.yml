@@ -306,12 +306,14 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Build Custom Stealth BakaSU Manager & Patch Kernel Cert
         run: |
-          sdkmanager --install "ndk;27.0.12077973" "build-tools;35.0.0" "platforms;android-35"
+          export ANDROID_HOME="/usr/local/lib/android/sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager" | sort -V | tail -n 1)
+          
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "ndk;27.0.12077973" "build-tools;35.0.0" "platforms;android-35"
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
           
           rustup default stable
@@ -353,11 +355,11 @@ jobs:
           ./gradlew assembleRelease -x lint -x test || ./gradlew assembleDebug -x lint -x test
 
           BUILT_APK=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
-          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name "zipalign" | sort -V | tail -n 1)
 
-          $ZIPALIGN -f -p 4 "$BUILT_APK" aligned.apk
-          $APKSIGNER sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
+          "$ZIPALIGN" -f -p 4 "$BUILT_APK" aligned.apk
+          "$APKSIGNER" sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
 
           mkdir -p "$GITHUB_WORKSPACE/work/dist"
           cp StealthManager.apk "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
