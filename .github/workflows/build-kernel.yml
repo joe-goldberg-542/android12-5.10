@@ -311,7 +311,6 @@ jobs:
           export ANDROID_HOME="/usr/local/lib/android/sdk"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
           
-          # Use runner's preinstalled NDK to avoid mismatch/download overhead
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
@@ -319,11 +318,14 @@ jobs:
           rustup default stable
           rustup target add aarch64-linux-android
           
-          # Use standard cargo build with explicit NDK target linker instead of cargo-ndk panics
+          # Fix C++ standard library linking for mkbootfs in ksud build.rs
           cd work/common/KernelSU/userspace/ksud
           
           export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
+          export CXX_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          export CXXFLAGS="-stdlib=libc++"
+          export LDFLAGS="-lc++_shared -lc++abi"
           
           cargo build --target aarch64-linux-android --release
           cd ../../..
