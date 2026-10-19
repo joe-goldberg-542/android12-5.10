@@ -239,7 +239,7 @@ jobs:
           git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch || echo "Warning: SUSFS patch issue"
+          # The SusFS patch (50_add_sysfs_in_gki-android12-5.10.patch) is now automatically handled via the 'patches' folder step above.
 
       - name: Integrate BakaSU (Merge Selected Branches)
         run: |
