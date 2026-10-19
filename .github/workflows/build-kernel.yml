@@ -319,7 +319,7 @@ jobs:
           rustup target add aarch64-linux-android --toolchain nightly
           
           # 1. Build ksud daemon for arm64
-          cd work/common/KernelSU/userspace/ksud
+          cd "$GITHUB_WORKSPACE/work/common/KernelSU/userspace/ksud"
           
           export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
           export CXX_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++"
@@ -328,13 +328,12 @@ jobs:
           export LDFLAGS="-lc++_shared -lc++abi"
           
           cargo +nightly build --target aarch64-linux-android --release
-          cd ../../..
           
           # 2. Spoof Package Name, App Label, and Native Payload Name
           NEW_PKG="com.sys.coreservice.auto"
           NEW_LABEL="Core Service"
           
-          cd work/common/KernelSU
+          cd "$GITHUB_WORKSPACE/work/common/KernelSU"
           
           find manager/ -type f -name "*.gradle*" \
             -exec sed -i -E "s/applicationId[[:space:]]*=*[[:space:]]*\"[^\"]+\"/applicationId = \"$NEW_PKG\"/g" {} +
