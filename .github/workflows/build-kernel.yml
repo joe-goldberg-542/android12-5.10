@@ -315,11 +315,10 @@ jobs:
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           
-          # Switch to nightly toolchain required by BakaSU ksud
           rustup default nightly
           rustup target add aarch64-linux-android --toolchain nightly
           
-          # Fix C++ standard library linking for mkbootfs in ksud build.rs
+          # 1. Build ksud daemon for arm64
           cd work/common/KernelSU/userspace/ksud
           
           export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
@@ -331,7 +330,7 @@ jobs:
           cargo +nightly build --target aarch64-linux-android --release
           cd ../../..
           
-          # 1. Spoof Package Name, App Label, and Native Payload Name
+          # 2. Spoof Package Name, App Label, and Native Payload Name
           NEW_PKG="com.sys.coreservice.auto"
           NEW_LABEL="Core Service"
           
@@ -351,11 +350,11 @@ jobs:
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
-          # 2. Place built ksud binary as libsysutils.so
+          # 3. Place built ksud binary as libsysutils.so
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
           cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
           
-          # 3. Generate Fresh Keystore & Build Manager APK
+          # 4. Generate Fresh Keystore & Build Manager APK
           cd manager
           keytool -genkeypair -v \
             -keystore custom.jks \
@@ -377,7 +376,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/work/dist"
           cp StealthManager.apk "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
 
-          # 4. Extract Certificate Size & SHA256 Hash for Kernel Verification
+          # 5. Extract Certificate Size & SHA256 Hash for Kernel Verification
           python3 - << 'EOF'
           import hashlib, subprocess
 
@@ -403,7 +402,7 @@ jobs:
               out.write(f"KSU_EXPECTED_HASH={sha256}\n")
           EOF
 
-          # 5. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
+          # 6. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
           cd ..
           source kernel_cert_env.txt
           
