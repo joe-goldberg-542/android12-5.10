@@ -310,21 +310,29 @@ jobs:
         run: |
           export ANDROID_HOME="/usr/local/lib/android/sdk"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name "sdkmanager" | sort -V | tail -n 1)
           
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install "ndk;27.0.12077973" "build-tools;35.0.0" "platforms;android-35"
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          # Use runner's preinstalled NDK to avoid mismatch/download overhead
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           
           rustup default stable
           rustup target add aarch64-linux-android
-          cargo install cargo-ndk
           
-          cd work/common/KernelSU
+          # Use standard cargo build with explicit NDK target linker instead of cargo-ndk panics
+          cd work/common/KernelSU/userspace/ksud
+          
+          export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          
+          cargo build --target aarch64-linux-android --release
+          cd ../../..
           
           # 1. Spoof Package Name, App Label, and Native Payload Name
           NEW_PKG="com.sys.coreservice.auto"
           NEW_LABEL="Core Service"
+          
+          cd work/common/KernelSU
           
           find manager/ -type f -name "*.gradle*" \
             -exec sed -i -E "s/applicationId[[:space:]]*=*[[:space:]]*\"[^\"]+\"/applicationId = \"$NEW_PKG\"/g" {} +
@@ -340,14 +348,9 @@ jobs:
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
-          # 2. Build ksud daemon for arm64
-          cd userspace/ksud
-          cargo ndk -t arm64-v8a -p 31 build --release
-          cd ../..
-          
+          # 2. Place built ksud binary as libsysutils.so
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
-          KSUD_BIN=$(find userspace/ -path "*/aarch64-linux-android/release/ksud" | head -n 1)
-          cp "$KSUD_BIN" manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
+          cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
           
           # 3. Generate Fresh Keystore & Build Manager APK
           cd manager
@@ -411,7 +414,6 @@ jobs:
             echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Makefile
             echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Makefile
           fi
-
 
       - name: Lock UTS_RELEASE Version
         run: |
