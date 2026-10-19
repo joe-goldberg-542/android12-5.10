@@ -244,7 +244,6 @@ jobs:
       - name: Integrate BakaSU (Merge Selected Branches)
         run: |
           cd work/common
-          # Setup script ko sync-susfs branch se initialize karein taaki hooks mismatch na ho
           curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
           
           cd KernelSU
@@ -256,7 +255,6 @@ jobs:
           
           BRANCHES=(
             "sync-upstream"
-            "refine-flash"
             "renovate/maven-group-in-manager"
             "renovate/gradle-9.x"
           )
@@ -298,13 +296,16 @@ jobs:
           CONFIG_KSU_INLINE_HOOK=y
           CONFIG_KSU_SUSFS_SUS_MEMFD=y
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_MOUNT=y
           EOF
+
       - name: Setup JDK 21 for Stealth Manager APK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-          
+
       - name: Build Custom Stealth BakaSU Manager & Patch Kernel Cert
         run: |
           export ANDROID_HOME="/usr/local/lib/android/sdk"
@@ -566,6 +567,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with Merged BakaSU (5 branches) + Stealth Manager (Core Service) + SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (sync-susfs) + Stealth Manager (Core Service) + SuSFS v2.3.0. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
