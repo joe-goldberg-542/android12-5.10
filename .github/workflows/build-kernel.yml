@@ -244,17 +244,17 @@ jobs:
       - name: Integrate BakaSU (Merge Selected Branches)
         run: |
           cd work/common
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
+          # Setup script ko sync-susfs branch se initialize karein taaki hooks mismatch na ho
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/sync-susfs/kernel/setup.sh" | bash -s sync-susfs
           
           cd KernelSU
           git config user.email "joe_goldberg_542@protonmail.com"
           git config user.name "joe-goldberg-542"
           
           git fetch origin --prune
-          git checkout main
+          git checkout sync-susfs
           
           BRANCHES=(
-            "sync-susfs"
             "sync-upstream"
             "refine-flash"
             "renovate/maven-group-in-manager"
@@ -263,7 +263,7 @@ jobs:
           
           for branch in "${BRANCHES[@]}"; do
             echo "=========================================="
-            echo "Merging origin/$branch into main..."
+            echo "Merging origin/$branch into sync-susfs..."
             ACTUAL_BRANCH=$(git branch -r | grep -i "origin/$branch$" | sed 's/origin\///' | tr -d ' ' | head -n 1)
             
             if [ -n "$ACTUAL_BRANCH" ]; then
@@ -299,7 +299,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MEMFD=y
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
-
       - name: Setup JDK 21 for Stealth Manager APK
         uses: actions/setup-java@v4
         with:
