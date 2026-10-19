@@ -371,24 +371,30 @@ jobs:
           cargo +nightly build --target aarch64-linux-android --release
           
           NEW_PKG="com.sys.coreservice.auto"
+          NEW_PKG_UNDERSCORE="com_sys_coreservice_auto"
+          NEW_PKG_SLASH="com\/sys\/coreservice\/auto"
           NEW_LABEL="Core Service"
           
           cd "$GITHUB_WORKSPACE/work/common/KernelSU"
           
-          # manager folder ki har file (gradle, xml, kt, java) me package name replace karo
-          find manager/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" \) \
+          # 1. Normal Dot Format replace karein (.kt, .java, .gradle, .xml, .toml, .c, .cpp, .h)
+          find manager/ userspace/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rs" \) \
             -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
 
-          # userspace/ksud me bhi package name replace karo
-          find userspace/ -type f -name "*.rs" \
-            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
+          # 2. JNI Underscore Format replace karein (C/C++ function exports ke liye)
+          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
+            -exec sed -i "s/com_resukisu_resukisu/$NEW_PKG_UNDERSCORE/g; s/org_bakasu_bakasu/$NEW_PKG_UNDERSCORE/g; s/me_weishu_kernelsu/$NEW_PKG_UNDERSCORE/g" {} +
 
-          # App ka naam strings.xml me replace karo
+          # 3. JNI Slash Format replace karein (FindClass ke liye)
+          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
+            -exec sed -i "s/com\/resukisu\/resukisu/$NEW_PKG_SLASH/g; s/org\/bakasu\/bakasu/$NEW_PKG_SLASH/g; s/me\/weishu\/kernelsu/$NEW_PKG_SLASH/g" {} +
+
+          # 4. App Name strings.xml me replace karein
           find manager/ -type f -name "strings.xml" \
             -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
 
-          # Daemon library ka naam change karo
-          find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
+          # 5. Daemon library ka naam change karein
+          find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
