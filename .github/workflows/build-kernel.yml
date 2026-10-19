@@ -305,7 +305,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-
+          
       - name: Build Custom Stealth BakaSU Manager & Patch Kernel Cert
         run: |
           export ANDROID_HOME="/usr/local/lib/android/sdk"
@@ -318,7 +318,7 @@ jobs:
           
           rustup default stable
           rustup target add aarch64-linux-android
-          curl -L https://github.com/bbqsrc/cargo-ndk/releases/download/v4.1.2/cargo-ndk-linux-x86_64.tar.gz | tar -xz -C ~/.cargo/bin
+          cargo install cargo-ndk
           
           cd work/common/KernelSU
           
@@ -326,25 +326,21 @@ jobs:
           NEW_PKG="com.sys.coreservice.auto"
           NEW_LABEL="Core Service"
           
-          # Replace only applicationId in build.gradle(.kts) so Kotlin package imports don't break
           find manager/ -type f -name "*.gradle*" \
             -exec sed -i -E "s/applicationId[[:space:]]*=*[[:space:]]*\"[^\"]+\"/applicationId = \"$NEW_PKG\"/g" {} +
           find manager/ -type f -name "*.gradle*" \
             -exec sed -i -E 's/applicationIdSuffix[[:space:]]*=*[[:space:]]*"[^"]+"//g' {} +
             
-          # Replace hardcoded manager package references in manager/ and userspace/
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.rs" \) \
             -exec sed -i "s/\"com\.resukisu\.resukisu[^\"]*\"/\"$NEW_PKG\"/g; s/\"org\.bakasu\.bakasu[^\"]*\"/\"$NEW_PKG\"/g; s/\"me\.weishu\.kernelsu[^\"]*\"/\"$NEW_PKG\"/g" {} +
             
-          # Replace App Label in strings.xml
           find manager/ -type f -name "strings.xml" \
             -exec sed -i "s/>BakaSU[^<]*</>$NEW_LABEL</g; s/>ReSukiSU[^<]*</>$NEW_LABEL</g; s/>KernelSU[^<]*</>$NEW_LABEL</g" {} +
             
-          # Rename native payload libksud.so -> libsysutils.so
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
-          # 2. Build ksud daemon for arm64 (cd inside userspace/ksud first)
+          # 2. Build ksud daemon for arm64
           cd userspace/ksud
           cargo ndk -t arm64-v8a -p 31 build --release
           cd ../..
@@ -415,6 +411,7 @@ jobs:
             echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Makefile
             echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Makefile
           fi
+
 
       - name: Lock UTS_RELEASE Version
         run: |
