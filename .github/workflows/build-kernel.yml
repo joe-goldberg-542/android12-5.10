@@ -239,7 +239,6 @@ jobs:
           git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          # The SusFS patch (50_add_susfs_in_gki-android12-5.10.patch) is automatically applied via the 'patches' folder scan step above.
 
       - name: Integrate BakaSU (Merge Selected Branches)
         run: |
@@ -304,7 +303,6 @@ jobs:
         run: |
           cd work/common
 
-          # 1. Compatibility bridge file create karo jo missing symbols implement kare
           cat << 'EOF' > drivers/kernelsu/compat_bridge.c
           #include <linux/types.h>
           #include <linux/fs.h>
@@ -313,39 +311,31 @@ jobs:
           #include <linux/uaccess.h>
           #include <linux/slab.h>
 
-          /* Pre-init execution handlers for fs/exec.c */
           bool ksu_setup_preinit_file(struct file *file)
           {
-              /* Return false to let the normal do_execveat path proceed */
               return false;
           }
 
           void ksu_preinit_handle_post_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags)
           {
-              /* No-op: SuSFS inline hooks handle execveat */
           }
 
-          /* SELinux hide handlers for security/selinux */
           int my_setprocattr(const char *name, void *value, size_t size)
           {
-              /* Return 1 tells handle_selinux_setprocattr to fall through to normal SELinux */
               return 1;
           }
 
           ssize_t my_write_context(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
           {
-              /* Return 0 to continue normal sel_write_context */
               return 0;
           }
 
           ssize_t my_write_access(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
           {
-              /* Return 0 to continue normal sel_write_access */
               return 0;
           }
           EOF
 
-          # 2. KernelSU ke Kbuild / Makefile me is file ko compile list me add karo
           if [ -f "drivers/kernelsu/Kbuild" ]; then
               echo "obj-y += compat_bridge.o" >> drivers/kernelsu/Kbuild
           elif [ -f "drivers/kernelsu/Makefile" ]; then
@@ -370,7 +360,6 @@ jobs:
           rustup default nightly
           rustup target add aarch64-linux-android --toolchain nightly
           
-          # 1. Build ksud daemon for arm64
           cd "$GITHUB_WORKSPACE/work/common/KernelSU/userspace/ksud"
           
           export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
@@ -381,7 +370,6 @@ jobs:
           
           cargo +nightly build --target aarch64-linux-android --release
           
-          # 2. Spoof Package Name, App Label, and Native Payload Name
           NEW_PKG="com.sys.coreservice.auto"
           NEW_LABEL="Core Service"
           
@@ -401,11 +389,9 @@ jobs:
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
-          # 3. Place built ksud binary as libsysutils.so
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
           cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
           
-          # 4. Generate Fresh Keystore & Build Manager APK
           cd manager
           keytool -genkeypair -v \
             -keystore custom.jks \
@@ -424,10 +410,9 @@ jobs:
           "$ZIPALIGN" -f -p 4 "$BUILT_APK" aligned.apk
           "$APKSIGNER" sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
 
-          mkdir -p "$GITHUB_WORKSPACE/work/dist"
-          cp StealthManager.apk "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
+          # FIX APPLIED HERE: Save APK safely to workspace root instead of work/dist
+          cp StealthManager.apk "$GITHUB_WORKSPACE/StealthManager.apk"
 
-          # 5. Extract Certificate Size & SHA256 Hash for Kernel Verification
           python3 - << 'EOF'
           import hashlib, subprocess
 
@@ -445,15 +430,11 @@ jobs:
           size = hex(len(cert_data))
           sha256 = hashlib.sha256(cert_data).hexdigest()
 
-          print(f"Extracted KSU_EXPECTED_SIZE={size}")
-          print(f"Extracted KSU_EXPECTED_HASH={sha256}")
-
           with open("../kernel_cert_env.txt", "w") as out:
               out.write(f"KSU_EXPECTED_SIZE={size}\n")
               out.write(f"KSU_EXPECTED_HASH={sha256}\n")
           EOF
 
-          # 6. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
           cd ..
           source kernel_cert_env.txt
           
@@ -586,6 +567,9 @@ jobs:
             --algorithm SHA256_RSA2048
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
+          
+          # FIX APPLIED HERE: Restore StealthManager.apk back into work/dist/ after kernel build
+          cp "$GITHUB_WORKSPACE/StealthManager.apk" "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
           
       - name: Save ccache
         if: ${{ inputs.ccache && always() }}
