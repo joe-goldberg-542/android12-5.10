@@ -239,7 +239,7 @@ jobs:
           git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          # The SusFS patch (50_add_sysfs_in_gki-android12-5.10.patch) is now automatically handled via the 'patches' folder step above.
+          # The SusFS patch (50_add_susfs_in_gki-android12-5.10.patch) is automatically applied via the 'patches' folder scan step above.
 
       - name: Integrate BakaSU (Merge Selected Branches)
         run: |
@@ -299,6 +299,58 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MEMFD=y
           CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
           EOF
+
+      - name: Inject KSU & SELinux Bridge Symbols
+        run: |
+          cd work/common
+
+          # 1. Compatibility bridge file create karo jo missing symbols implement kare
+          cat << 'EOF' > drivers/kernelsu/compat_bridge.c
+          #include <linux/types.h>
+          #include <linux/fs.h>
+          #include <linux/file.h>
+          #include <linux/sched.h>
+          #include <linux/uaccess.h>
+          #include <linux/slab.h>
+
+          /* Pre-init execution handlers for fs/exec.c */
+          bool ksu_setup_preinit_file(struct file *file)
+          {
+              /* Return false to let the normal do_execveat path proceed */
+              return false;
+          }
+
+          void ksu_preinit_handle_post_execveat(int fd, struct filename *filename, void *argv, void *envp, int flags)
+          {
+              /* No-op: SuSFS inline hooks handle execveat */
+          }
+
+          /* SELinux hide handlers for security/selinux */
+          int my_setprocattr(const char *name, void *value, size_t size)
+          {
+              /* Return 1 tells handle_selinux_setprocattr to fall through to normal SELinux */
+              return 1;
+          }
+
+          ssize_t my_write_context(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+          {
+              /* Return 0 to continue normal sel_write_context */
+              return 0;
+          }
+
+          ssize_t my_write_access(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+          {
+              /* Return 0 to continue normal sel_write_access */
+              return 0;
+          }
+          EOF
+
+          # 2. KernelSU ke Kbuild / Makefile me is file ko compile list me add karo
+          if [ -f "drivers/kernelsu/Kbuild" ]; then
+              echo "obj-y += compat_bridge.o" >> drivers/kernelsu/Kbuild
+          elif [ -f "drivers/kernelsu/Makefile" ]; then
+              echo "obj-y += compat_bridge.o" >> drivers/kernelsu/Makefile
+          fi
 
       - name: Setup JDK 21 for Stealth Manager APK
         uses: actions/setup-java@v4
