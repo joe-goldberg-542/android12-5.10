@@ -375,17 +375,19 @@ jobs:
           
           cd "$GITHUB_WORKSPACE/work/common/KernelSU"
           
-          find manager/ -type f -name "*.gradle*" \
-            -exec sed -i -E "s/applicationId[[:space:]]*=*[[:space:]]*\"[^\"]+\"/applicationId = \"$NEW_PKG\"/g" {} +
-          find manager/ -type f -name "*.gradle*" \
-            -exec sed -i -E 's/applicationIdSuffix[[:space:]]*=*[[:space:]]*"[^"]+"//g' {} +
-            
-          find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.rs" \) \
-            -exec sed -i "s/\"com\.resukisu\.resukisu[^\"]*\"/\"$NEW_PKG\"/g; s/\"org\.bakasu\.bakasu[^\"]*\"/\"$NEW_PKG\"/g; s/\"me\.weishu\.kernelsu[^\"]*\"/\"$NEW_PKG\"/g" {} +
-            
+          # manager folder ki har file (gradle, xml, kt, java) me package name replace karo
+          find manager/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" \) \
+            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
+
+          # userspace/ksud me bhi package name replace karo
+          find userspace/ -type f -name "*.rs" \
+            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
+
+          # App ka naam strings.xml me replace karo
           find manager/ -type f -name "strings.xml" \
-            -exec sed -i "s/>BakaSU[^<]*</>$NEW_LABEL</g; s/>ReSukiSU[^<]*</>$NEW_LABEL</g; s/>KernelSU[^<]*</>$NEW_LABEL</g" {} +
-            
+            -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
+
+          # Daemon library ka naam change karo
           find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" \) \
             -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
 
@@ -410,7 +412,6 @@ jobs:
           "$ZIPALIGN" -f -p 4 "$BUILT_APK" aligned.apk
           "$APKSIGNER" sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
 
-          # FIX APPLIED HERE: Save APK safely to workspace root instead of work/dist
           cp StealthManager.apk "$GITHUB_WORKSPACE/StealthManager.apk"
 
           python3 - << 'EOF'
@@ -567,8 +568,6 @@ jobs:
             --algorithm SHA256_RSA2048
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
-          
-          # FIX APPLIED HERE: Restore StealthManager.apk back into work/dist/ after kernel build
           cp "$GITHUB_WORKSPACE/StealthManager.apk" "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
           
       - name: Save ccache
