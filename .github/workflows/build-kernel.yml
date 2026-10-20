@@ -395,7 +395,11 @@ jobs:
           find manager/ -type f -name "strings.xml" \
             -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
 
-          # 3. Place built ksud binary as libksud.so (reverted from libsysutils.so)
+          # Red warning banner hide (Force isOfficial to true)
+          find manager/ -type f \( -name "*.kt" -o -name "*.java" \) \
+            -exec sed -i 's/fun isOfficial.*=.*/fun isOfficial(): Boolean = true/g' {} +
+
+          # 3. Place built ksud binary as libksud.so
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
           cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
           
