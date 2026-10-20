@@ -371,24 +371,31 @@ jobs:
           
           cargo +nightly build --target aarch64-linux-android --release
           
-          # 2. Spoof Package Name and App Label SAFELY (Compiler Level)
+          # 2. Spoof Package Name, App Label
           NEW_PKG="com.sys.coreservice.auto"
+          NEW_PKG_UNDERSCORE="com_sys_coreservice_auto"
+          NEW_PKG_SLASH="com\/sys\/coreservice\/auto"
           NEW_LABEL="Core Service"
           
           cd "$GITHUB_WORKSPACE/work/common/KernelSU"
           
-          # (A) Change Package Name AT COMPILER LEVEL ONLY (Safer method!)
-          find manager/ -type f -name "*.gradle*" -exec sed -i 's/applicationId = "[^"]*"/applicationId = "'"$NEW_PKG"'"/g' {} +
-          find manager/ -type f -name "*.gradle*" -exec sed -i 's/applicationId "[^"]*"/applicationId "'"$NEW_PKG"'"/g' {} +
-          find manager/ -type f -name "*.gradle*" -exec sed -i 's/applicationIdSuffix[[:space:]]*=*[[:space:]]*"[^"]+"//g' {} +
+          # Dot Format replace
+          find manager/ userspace/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rs" \) \
+            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
 
-          # (B) Change the Visual App Name completely
-          find manager/ -type f -name "strings.xml" -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
+          # JNI Underscore Format replace
+          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
+            -exec sed -i "s/com_resukisu_resukisu/$NEW_PKG_UNDERSCORE/g; s/org_bakasu_bakasu/$NEW_PKG_UNDERSCORE/g; s/me_weishu_kernelsu/$NEW_PKG_UNDERSCORE/g" {} +
 
-          # (C) PERMANENT FIX for "Unofficial Manager" Red Warning Banner!
-          find manager/ -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i 's/!isOfficial/false/g' {} +
+          # JNI Slash Format replace
+          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
+            -exec sed -i "s/com\/resukisu\/resukisu/$NEW_PKG_SLASH/g; s/org\/bakasu\/bakasu/$NEW_PKG_SLASH/g; s/me\/weishu\/kernelsu/$NEW_PKG_SLASH/g" {} +
 
-          # 3. Place built ksud binary as libksud.so
+          # App Name strings.xml me replace
+          find manager/ -type f -name "strings.xml" \
+            -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
+
+          # 3. Place built ksud binary as libksud.so (reverted from libsysutils.so)
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
           cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
           
