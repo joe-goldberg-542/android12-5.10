@@ -360,6 +360,7 @@ jobs:
           rustup default nightly
           rustup target add aarch64-linux-android --toolchain nightly
           
+          # 1. Build ksud daemon for arm64
           cd "$GITHUB_WORKSPACE/work/common/KernelSU/userspace/ksud"
           
           export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
@@ -370,6 +371,7 @@ jobs:
           
           cargo +nightly build --target aarch64-linux-android --release
           
+          # 2. Spoof Package Name, App Label
           NEW_PKG="com.sys.coreservice.auto"
           NEW_PKG_UNDERSCORE="com_sys_coreservice_auto"
           NEW_PKG_SLASH="com\/sys\/coreservice\/auto"
@@ -377,29 +379,27 @@ jobs:
           
           cd "$GITHUB_WORKSPACE/work/common/KernelSU"
           
-          # 1. Normal Dot Format replace karein (.kt, .java, .gradle, .xml, .toml, .c, .cpp, .h)
+          # Dot Format replace
           find manager/ userspace/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rs" \) \
             -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
 
-          # 2. JNI Underscore Format replace karein (C/C++ function exports ke liye)
+          # JNI Underscore Format replace
           find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
             -exec sed -i "s/com_resukisu_resukisu/$NEW_PKG_UNDERSCORE/g; s/org_bakasu_bakasu/$NEW_PKG_UNDERSCORE/g; s/me_weishu_kernelsu/$NEW_PKG_UNDERSCORE/g" {} +
 
-          # 3. JNI Slash Format replace karein (FindClass ke liye)
+          # JNI Slash Format replace
           find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
             -exec sed -i "s/com\/resukisu\/resukisu/$NEW_PKG_SLASH/g; s/org\/bakasu\/bakasu/$NEW_PKG_SLASH/g; s/me\/weishu\/kernelsu/$NEW_PKG_SLASH/g" {} +
 
-          # 4. App Name strings.xml me replace karein
+          # App Name strings.xml me replace
           find manager/ -type f -name "strings.xml" \
             -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
 
-          # 5. Daemon library ka naam change karein
-          find manager/ userspace/ -type f \( -name "*.kt" -o -name "*.java" -o -name "*.gradle*" -o -name "*.rs" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-            -exec sed -i "s/libksud\.so/libsysutils.so/g" {} +
-
+          # 3. Place built ksud binary as libksud.so (reverted from libsysutils.so)
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
-          cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libsysutils.so
+          cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
           
+          # 4. Generate Fresh Keystore & Build Manager APK
           cd manager
           keytool -genkeypair -v \
             -keystore custom.jks \
@@ -418,8 +418,10 @@ jobs:
           "$ZIPALIGN" -f -p 4 "$BUILT_APK" aligned.apk
           "$APKSIGNER" sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
 
+          # Save APK safely to workspace root
           cp StealthManager.apk "$GITHUB_WORKSPACE/StealthManager.apk"
 
+          # 5. Extract Certificate Size & SHA256 Hash for Kernel Verification
           python3 - << 'EOF'
           import hashlib, subprocess
 
@@ -437,11 +439,15 @@ jobs:
           size = hex(len(cert_data))
           sha256 = hashlib.sha256(cert_data).hexdigest()
 
+          print(f"Extracted KSU_EXPECTED_SIZE={size}")
+          print(f"Extracted KSU_EXPECTED_HASH={sha256}")
+
           with open("../kernel_cert_env.txt", "w") as out:
               out.write(f"KSU_EXPECTED_SIZE={size}\n")
               out.write(f"KSU_EXPECTED_HASH={sha256}\n")
           EOF
 
+          # 6. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
           cd ..
           source kernel_cert_env.txt
           
