@@ -342,126 +342,6 @@ jobs:
               echo "obj-y += compat_bridge.o" >> drivers/kernelsu/Makefile
           fi
 
-      - name: Setup JDK 21 for Stealth Manager APK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Build Custom Stealth BakaSU Manager & Patch Kernel Cert
-        run: |
-          export ANDROID_HOME="/usr/local/lib/android/sdk"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
-          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
-          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-          
-          rustup default nightly
-          rustup target add aarch64-linux-android --toolchain nightly
-          
-          # 1. Build ksud daemon for arm64
-          cd "$GITHUB_WORKSPACE/work/common/KernelSU/userspace/ksud"
-          
-          export CC_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang"
-          export CXX_aarch64_linux_android="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang++"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
-          export CXXFLAGS="-stdlib=libc++"
-          export LDFLAGS="-lc++_shared -lc++abi"
-          
-          cargo +nightly build --target aarch64-linux-android --release
-          
-          # 2. Spoof Package Name, App Label
-          NEW_PKG="com.sys.coreservice.auto"
-          NEW_PKG_UNDERSCORE="com_sys_coreservice_auto"
-          NEW_PKG_SLASH="com\/sys\/coreservice\/auto"
-          NEW_LABEL="Core Service"
-          
-          cd "$GITHUB_WORKSPACE/work/common/KernelSU"
-          
-          # Dot Format replace
-          find manager/ userspace/ -type f \( -name "*.gradle*" -o -name "*.kt" -o -name "*.java" -o -name "*.xml" -o -name "*.toml" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rs" \) \
-            -exec sed -i "s/com\.resukisu\.resukisu/$NEW_PKG/g; s/org\.bakasu\.bakasu/$NEW_PKG/g; s/me\.weishu\.kernelsu/$NEW_PKG/g" {} +
-
-          # JNI Underscore Format replace
-          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-            -exec sed -i "s/com_resukisu_resukisu/$NEW_PKG_UNDERSCORE/g; s/org_bakasu_bakasu/$NEW_PKG_UNDERSCORE/g; s/me_weishu_kernelsu/$NEW_PKG_UNDERSCORE/g" {} +
-
-          # JNI Slash Format replace
-          find manager/ -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-            -exec sed -i "s/com\/resukisu\/resukisu/$NEW_PKG_SLASH/g; s/org\/bakasu\/bakasu/$NEW_PKG_SLASH/g; s/me\/weishu\/kernelsu/$NEW_PKG_SLASH/g" {} +
-
-          # App Name strings.xml me replace
-          find manager/ -type f -name "strings.xml" \
-            -exec sed -i "s/>BakaSU</>$NEW_LABEL</g; s/>ReSukiSU</>$NEW_LABEL</g; s/>KernelSU</>$NEW_LABEL</g" {} +
-
-          # 3. Place built ksud binary as libksud.so (reverted from libsysutils.so)
-          mkdir -p manager/app/src/main/jniLibs/arm64-v8a
-          cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
-          
-          # 4. Generate Fresh Keystore & Build Manager APK
-          cd manager
-          keytool -genkeypair -v \
-            -keystore custom.jks \
-            -alias stealthkey \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass 123456 -keypass 123456 \
-            -dname "CN=Android, OU=System, O=OEM, L=Local, S=Local, C=US"
-
-          chmod +x gradlew
-          ./gradlew assembleRelease -x lint -x test || ./gradlew assembleDebug -x lint -x test
-
-          BUILT_APK=$(find app/build/outputs/apk -name "*.apk" | sort | head -n 1)
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
-          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name "zipalign" | sort -V | tail -n 1)
-
-          "$ZIPALIGN" -f -p 4 "$BUILT_APK" aligned.apk
-          "$APKSIGNER" sign --ks custom.jks --ks-key-alias stealthkey --ks-pass pass:123456 --key-pass pass:123456 --out StealthManager.apk aligned.apk
-
-          # Save APK safely to workspace root
-          cp StealthManager.apk "$GITHUB_WORKSPACE/StealthManager.apk"
-
-          # 5. Extract Certificate Size & SHA256 Hash for Kernel Verification
-          python3 - << 'EOF'
-          import hashlib, subprocess
-
-          subprocess.run([
-              "keytool", "-exportcert",
-              "-keystore", "custom.jks",
-              "-alias", "stealthkey",
-              "-storepass", "123456",
-              "-file", "cert.der"
-          ], check=True)
-
-          with open("cert.der", "rb") as f:
-              cert_data = f.read()
-
-          size = hex(len(cert_data))
-          sha256 = hashlib.sha256(cert_data).hexdigest()
-
-          print(f"Extracted KSU_EXPECTED_SIZE={size}")
-          print(f"Extracted KSU_EXPECTED_HASH={sha256}")
-
-          with open("../kernel_cert_env.txt", "w") as out:
-              out.write(f"KSU_EXPECTED_SIZE={size}\n")
-              out.write(f"KSU_EXPECTED_HASH={sha256}\n")
-          EOF
-
-          # 6. Patch KernelSU C code & Kbuild with new Cert Size, Hash & Package Name
-          cd ..
-          source kernel_cert_env.txt
-          
-          find kernel/ -type f \( -name "*.c" -o -name "*.h" -o -name "Kbuild" -o -name "Makefile" \) \
-            -exec sed -i "s/com\.resukisu\.resukisu[^\"]*/$NEW_PKG/g; s/org\.bakasu\.bakasu[^\"]*/$NEW_PKG/g; s/me\.weishu\.kernelsu[^\"]*/$NEW_PKG/g" {} +
-
-          if [ -f "kernel/Kbuild" ]; then
-            echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Kbuild
-            echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Kbuild
-          elif [ -f "kernel/Makefile" ]; then
-            echo "ccflags-y += -DKSU_EXPECTED_SIZE=$KSU_EXPECTED_SIZE -DKSU_EXPECTED_HASH=\\\"$KSU_EXPECTED_HASH\\\"" >> kernel/Makefile
-            echo "ccflags-y += -DKSU_MANAGER_PACKAGE=\\\"$NEW_PKG\\\"" >> kernel/Makefile
-          fi
-
       - name: Lock UTS_RELEASE Version
         run: |
           cd work/common
@@ -580,7 +460,6 @@ jobs:
             --algorithm SHA256_RSA2048
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
-          cp "$GITHUB_WORKSPACE/StealthManager.apk" "$GITHUB_WORKSPACE/work/dist/StealthManager.apk"
           
       - name: Save ccache
         if: ${{ inputs.ccache && always() }}
@@ -603,7 +482,7 @@ jobs:
           pkg="$GITHUB_WORKSPACE/work/pkg"
           mkdir -p "$pkg"
           assets=()
-          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img StealthManager.apk; do
+          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img; do
             [ -f "$f" ] && assets+=("$f")
           done
           tar -I 'zstd -T0' -cf "$pkg/kernel-dist.tar.zst" .
@@ -614,6 +493,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with Merged BakaSU (5 branches) + Stealth Manager (Core Service) + SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with Merged BakaSU (5 branches) + SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
