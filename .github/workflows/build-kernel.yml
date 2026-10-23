@@ -18,7 +18,7 @@ on:
       kernel_branch:
         description: 'Kernel source branch'
         required: false
-        default: "Templar-6"
+        default: "Linux2-Staging"
       kernel_commit:
         description: 'Kernel source commit'
         required: false
@@ -130,24 +130,6 @@ jobs:
           if [ -n "${{ env.KERNEL_COMMIT }}" ]; then
             git checkout ${{ env.KERNEL_COMMIT }}
           fi
-
-      - name: Restore 5.10.271 Version
-        run: |
-          cd work/common
-          if ! git revert --no-edit 9be64aa501c6ac85a21b9860875cf1c6aa9cd6d2; then
-            git revert --abort || true
-            git checkout 9be64aa501c6ac85a21b9860875cf1c6aa9cd6d2~1 -- \
-              Makefile \
-              kernel/module.c \
-              kernel/sys.c \
-              kernel/utsname_sysctl.c
-            git commit -m "Revert 6.12.25 version spoofing back to 5.10.271"
-          fi
-
-          sed -i 's/^VERSION = .*/VERSION = 5/' Makefile
-          sed -i 's/^PATCHLEVEL = .*/PATCHLEVEL = 10/' Makefile
-          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 271/' Makefile
-          head -n 5 Makefile
 
       - name: Revert le9uo Commits
         run: |
