@@ -102,7 +102,7 @@ jobs:
 
       - name: Restore ccache
         if: ${{ inputs.ccache }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5.1.0
         with:
           path: work/.ccache
           key: cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-${{ github.run_id }}
@@ -257,7 +257,6 @@ jobs:
           BRANCHES=(
             "sync-susfs"
             "sync-upstream"
-            "refine-flash"
             "renovate/maven-group-in-manager"
             "renovate/gradle-9.x"
           )
@@ -465,7 +464,7 @@ jobs:
           
       - name: Save ccache
         if: ${{ inputs.ccache && always() }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5.1.0
         with:
           path: work/.ccache
           key: cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-${{ github.run_id }}
