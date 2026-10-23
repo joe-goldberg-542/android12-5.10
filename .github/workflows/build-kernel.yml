@@ -59,7 +59,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     env:
       KERNEL_REPO: ${{ inputs.kernel_repo }}
@@ -77,7 +77,9 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
 
       - name: Free Disk Space
         run: |
@@ -89,7 +91,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4
+          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 cmake zlib1g-dev zip
           pip install lxml
 
       - name: Configure Git Identity
@@ -467,6 +469,22 @@ jobs:
         with:
           path: work/.ccache
           key: cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-${{ github.run_id }}
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v8.0.2
+        with:
+          name: build-kernel-${{ github.run_number }}
+          path: |
+            work/dist/Image
+            work/dist/Image.lz4
+            work/dist/Image.gz
+            work/dist/vmlinux
+            work/dist/System.map
+            work/dist/ikconfig
+            work/dist/.config
+            work/dist/boot.img
+          retention-days: 7
 
       - name: Publish Release
         if: ${{ inputs.publish_release }}
