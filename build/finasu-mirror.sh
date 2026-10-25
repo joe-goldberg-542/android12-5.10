@@ -1,22 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mirror the FinaSU ksud binaries from the latest successful GitHub
-# Actions run into ksu-<artifact>.zip files, ready for the durable prebuilts
-# release. build-kernel.yml consumes these via kernelsu-fetch.sh's
-# KSU_PREBUILT_BASE fallback, which expects ksu-<artifact>.zip naming, so the
-# 90-day actions-artifact expiry never blocks a kernel build.
-#
-# FinaSU is built into the Templar kernel source itself, so only ksud is
-# mirrored (it swaps the kernel image on device).
-#
-# Outputs are written to OUT_DIR (default: ./ksu-assets):
-#   ksu-ksud-aarch64-linux-android.zip ksu-ksud-armv7-linux-androideabi.zip
-
-# ==> SETTINGS FOR FINASU INTEGRATION <==
 KSU_OWNER=${KSU_OWNER:-LyraVoid}
 KSU_REPO=${KSU_REPO:-FinaSU}
-KSU_BRANCH=${KSU_BRANCH:-master} # FinaSU uses 'master', not 'main'
+KSU_BRANCH=${KSU_BRANCH:-dev}
 KSU_WANT=${KSU_WANT:-'ksud-*'}
 OUT_DIR=${OUT_DIR:-$PWD/ksu-assets}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -24,8 +11,6 @@ GITHUB_TOKEN=${GITHUB_TOKEN:-}
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[ERR]\033[0m %s\n' "$*" >&2; exit 1; }
-# Bound only the connect phase: a hanging endpoint otherwise stalls on the host
-# TCP connect timeout (~130s) x --retry 3 between GitHub API calls.
 curl_dl() { curl --connect-timeout 10 "$@"; }
 
 [ -n "$GITHUB_TOKEN" ] || die "GITHUB_TOKEN is required (GitHub denies unauthenticated artifact downloads)"
@@ -50,9 +35,6 @@ for page in 1 2 3 4 5; do
     mapfile -t ids < <(curl_dl -sfL "${AUTH[@]}" \
         "$API/actions/runs?branch=$KSU_BRANCH&status=success&per_page=10&page=$page" | \
         python3 -c "import json,sys; print('\n'.join(str(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])))")
-    # python print() emits a trailing newline even for an empty run list, so
-    # mapfile yields ("", ...) rather than an empty array; drop empty lines so
-    # the page-empty check below actually fires on past-the-end pages.
     page_ids=()
     for id in "${ids[@]}"; do
         [ -n "$id" ] && page_ids+=("$id")
@@ -60,13 +42,7 @@ for page in 1 2 3 4 5; do
     [ "${#page_ids[@]}" -eq 0 ] && break
     run_ids+=("${page_ids[@]}")
 
-    # Runs come back newest-first; the newest run with the wanted artifacts is
-    # the only one consumed. Check each page before fetching the next so a
-    # match on the first page short-circuits the remaining pages instead of
-    # eagerly paginating all 50 runs.
     for run_id in "${page_ids[@]}"; do
-        # Parse "name id" pairs in one call; the artifact ids needed for the
-        # download URLs are already in this response, so no per-name re-query.
         mapfile -t art < <(curl_dl -sfL "${AUTH[@]}" \
             "$API/actions/runs/$run_id/artifacts?per_page=100" | \
             python3 -c "import json,sys; print('\n'.join(f\"{a['name']} {a['id']}\" for a in json.load(sys.stdin).get('artifacts',[])))")
@@ -82,8 +58,6 @@ for page in 1 2 3 4 5; do
         [ "${#matched[@]}" -gt 0 ] || { info "run $run_id has no wanted artifacts, skipping"; continue; }
 
         ok "using run $run_id ($KSU_OWNER/$KSU_REPO @ $KSU_BRANCH)"
-        # The matched artifacts are independent and network-bound; overlap the
-        # downloads instead of serializing each zip's round-trip.
         dl_pids=()
         dl_rc=0
         for i in "${!matched[@]}"; do
