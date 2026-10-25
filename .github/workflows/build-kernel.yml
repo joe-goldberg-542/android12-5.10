@@ -44,10 +44,6 @@ on:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
         default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_KALLSYMS=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KSU_TOOLKIT_SUPPORT=y,CONFIG_KSU_INLINE_HOOK=y,CONFIG_KSU_DISABLE_SELINUX_VFS_GETXATTR=y,CONFIG_KSU_DEBUG=n,CONFIG_KSU_SUCOMPAT=n,CONFIG_OVERLAY_FS=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_NOMOUNT=y"
-      ccache:
-        description: 'Accelerate with ccache.'
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -70,7 +66,6 @@ jobs:
       APPEND_BUILD_ENV: ${{ inputs.append_build_env }}
       APPEND_CONFIG: ${{ inputs.append_config }}
       RELEASE_TAG: ${{ inputs.release_tag }}
-      CCACHE_OPT: ${{ inputs.ccache && '1' || '' }}
       GITHUB_TOKEN: ${{ github.token }}
       KMI_SYMBOL_LIST_STRICT_MODE: "0"
       UPDATE_SYMBOL_LIST: "0"
@@ -91,7 +86,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdw-dev ccache gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 cmake zlib1g-dev zip unzip
+          sudo apt-get install -y libdw-dev gh bc bison flex libssl-dev libelf-dev dwarves cpio curl zstd lz4 cmake zlib1g-dev zip unzip
           pip install lxml
 
       - name: Configure Git Identity
@@ -99,17 +94,6 @@ jobs:
           git config --global --add safe.directory "*"
           git config --global user.email "joe_goldberg_542@protonmail.com"
           git config --global user.name "joe-goldberg-542"
-
-      - name: Restore ccache
-        if: ${{ inputs.ccache }}
-        uses: actions/cache@v5.1.0
-        with:
-          path: work/.ccache
-          key: cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-${{ github.run_id }}
-          restore-keys: |
-            cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-
-            cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-
-          fail-on-cache-miss: false
 
       - name: Allocate 15GB Swap
         run: |
@@ -359,14 +343,14 @@ jobs:
           ./antman --patch=glibc
           
           echo "$GITHUB_WORKSPACE/neutron-clang/bin" >> $GITHUB_PATH
-          echo "CC=ccache clang" >> $GITHUB_ENV
-          echo "CXX=ccache clang++" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
           echo "LTO=full" >> $GITHUB_ENV
           
       - name: Build Kernel
         run: |
           chmod +x ./build-kernel.sh
-          ./build-kernel.sh ${{ inputs.ccache && '--ccache' || '' }}
+          ./build-kernel.sh
 
       - name: Repack and Sign Boot Image
         env:
@@ -449,13 +433,6 @@ jobs:
 
           cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
           
-      - name: Save ccache
-        if: ${{ inputs.ccache && always() }}
-        uses: actions/cache/save@v5.1.0
-        with:
-          path: work/.ccache
-          key: cfx-ccache-${{ env.CLANG_ASSET }}-${{ inputs.kernel_repo }}-${{ inputs.kernel_branch }}-${{ github.run_id }}
-
       - name: Upload Build Artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.2
