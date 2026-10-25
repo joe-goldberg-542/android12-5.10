@@ -170,7 +170,6 @@ fetch_kernel() {
 
 resolve_clang_dir() {
     local dir found
-    # Add Neutron Clang directory to search path (Fixed path to SCRIPT_DIR)
     for dir in "$SCRIPT_DIR/neutron-clang" \
                "$WORK_DIR/prebuilts-master/clang/host/linux-x86" \
                "$WORK_DIR/prebuilts/clang/host/linux-x86" \
@@ -220,9 +219,8 @@ fetch_clang_extract() {
 }
 
 fetch_clang() {
-    # Custom Logic for Neutron Clang 24 Download
     if [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
-        local neutron_dir="$SCRIPT_DIR/neutron-clang" # <-- Yahan SCRIPT_DIR kar diya gaya hai
+        local neutron_dir="$SCRIPT_DIR/neutron-clang" 
         if [ ! -x "$neutron_dir/bin/clang" ]; then
             info "Downloading Neutron Clang via antman..."
             mkdir -p "$neutron_dir"
@@ -475,7 +473,9 @@ write_build_config() {
     cat > "$WORK_DIR/build.config.cloudfox" <<EOF
 export KERNEL_DIR=$KERNEL_DIR
 . \${ROOT_DIR}/\${KERNEL_DIR}/build.config.gki.aarch64
-export POST_DEFCONFIG_CMDS="\${ROOT_DIR}/build/self-heal-config.sh"
+
+# Forcefully generating headers directly into output path right after DEFCONFIG setup natively to fix UAPI missing FinaSU error hook bypass check.
+export POST_DEFCONFIG_CMDS="\${ROOT_DIR}/build/self-heal-config.sh && make -C \${ROOT_DIR}/\${KERNEL_DIR} O=\${OUT_DIR} ARCH=\${ARCH:-arm64} LLVM=1 headers_install"
 EOF
     if [ -n "$CLANG_URL" ] || [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
         cat >> "$WORK_DIR/build.config.cloudfox" <<'EOF'
