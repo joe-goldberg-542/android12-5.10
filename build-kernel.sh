@@ -35,7 +35,7 @@ DEFCONFIG_FRAGMENT=${DEFCONFIG_FRAGMENT:-}
 DEFCONFIG_FRAGMENT_EXCLUDE=${DEFCONFIG_FRAGMENT_EXCLUDE:-}
 APPEND_BUILD_ENV=${APPEND_BUILD_ENV:-}
 APPEND_CONFIG=${APPEND_CONFIG:-}
-LTO=${LTO:-full} # Default LTO set to full
+LTO=${LTO:-full} 
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
@@ -393,7 +393,8 @@ export KERNEL_DIR=$KERNEL_DIR
 . \${ROOT_DIR}/\${KERNEL_DIR}/build.config.gki.aarch64
 
 # Forcefully generating headers directly into output path right after DEFCONFIG setup natively to fix UAPI missing FinaSU error hook bypass check.
-export POST_DEFCONFIG_CMDS="\${ROOT_DIR}/build/self-heal-config.sh && make -C \${ROOT_DIR}/\${KERNEL_DIR} O=\${OUT_DIR} ARCH=\${ARCH:-arm64} LLVM=1 headers_install"
+# FIX applied: Changed out-string configuration from "" quotes to single '' avoiding null $OUT_DIR pollution tree corruption at execution delay frame!
+export POST_DEFCONFIG_CMDS='\${ROOT_DIR}/build/self-heal-config.sh && make -C \${ROOT_DIR}/\${KERNEL_DIR} O=\${OUT_DIR} ARCH=\${ARCH:-arm64} LLVM=1 LLVM_IAS=1 headers_install'
 EOF
     if [ -n "$CLANG_URL" ] || [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
         cat >> "$WORK_DIR/build.config.cloudfox" <<'EOF'
