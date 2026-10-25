@@ -10,7 +10,6 @@ esac
 CLEAN=${CLEAN:-0}
 SKIP_FETCH=${SKIP_FETCH:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
-CCACHE_OPT=${CCACHE_OPT:-}
 WORK_DIR=${WORK_DIR:-"$SCRIPT_DIR/work"}
 KERNEL_DIR=${KERNEL_DIR:-common}
 KERNEL_REPO=${KERNEL_REPO:-https://github.com/CloudFox-INC/CloudFox-Kernel}
@@ -69,7 +68,6 @@ while [[ $# -gt 0 ]]; do
         --defconfig-fragment) DEFCONFIG_FRAGMENT=$2; shift 2 ;;
         --defconfig-fragment-exclude) DEFCONFIG_FRAGMENT_EXCLUDE=${DEFCONFIG_FRAGMENT_EXCLUDE:+$DEFCONFIG_FRAGMENT_EXCLUDE }$2; shift 2 ;;
         --clean)         CLEAN=1; shift ;;
-        --ccache)        CCACHE_OPT=1; shift ;;
         --skip-fetch)    SKIP_FETCH=1; shift ;;
         --skip-build)    SKIP_BUILD=1; shift ;;
         -h|--help)       usage 0 ;;
@@ -286,86 +284,6 @@ fetch_clang() {
         ln -sfnT "$clang_dir" "$WORK_DIR/$pin_dir"
         ok "linked clang toolchain to the pinned path"
     fi
-}
-
-fetch_ccache() {
-    command -v ccache >/dev/null 2>&1 && return 0
-    local arch
-    arch=$(uname -m)
-    [ "$arch" = "x86_64" ] || { warn "ccache: unsupported arch '$arch'; skipping"; return 0; }
-    local ver=4.13.6
-    local tmp="$WORK_DIR/downloads/ccache.tar.xz"
-    mkdir -p "$WORK_DIR/downloads"
-    curl_dl -fL --retry 3 -sS -o "$tmp" \
-        "https://github.com/ccache/ccache/releases/download/v${ver}/ccache-${ver}-linux-x86_64-glibc.tar.xz" \
-        || { warn "ccache: download failed; building without ccache"; return 0; }
-    local tree
-    tree=$(mktemp -d)
-    tar -xJf "$tmp" -C "$tree" --strip-components=1 \
-        && sudo install -m 0755 "$tree/ccache" /usr/local/bin/ccache
-    rm -rf "$tree"
-    command -v ccache >/dev/null 2>&1 || warn "ccache: install incomplete"
-}
-
-install_ccache_wrappers() {
-    [ -n "${CCACHE_OPT:-}" ] || return 0
-    [ -n "${CCACHE_WRAPPED:-}" ] && return 0   
-    local ccache_bin
-    ccache_bin=$(command -v ccache) || { warn "ccache requested but not installed"; CCACHE_OPT=; return 0; }
-    local clang_dir
-    clang_dir=$(resolve_clang_dir || true)
-    if [ -z "$clang_dir" ] || [ ! -x "$clang_dir/bin/clang" ]; then
-        warn "ccache: no clang toolchain to wrap"; CCACHE_OPT=; return 0
-    fi
-    "$ccache_bin" -o cache_dir="$WORK_DIR/.ccache" >/dev/null 2>&1 || true
-    mkdir -p "$WORK_DIR/.ccache" "$clang_dir/.cfx-orig-bin"
-    local tool target orig realbin
-    for tool in clang clang++ ${CCACHE_LINK_TOOLS:-aarch64-linux-gnu-clang aarch64-linux-gnu-clang++}; do
-        target="$clang_dir/bin/$tool"
-        [ -x "$target.real" ] && target="$target.real"
-        [ -e "$target" ] || [ -L "$target" ] || continue
-        realbin=
-        [ -L "$target" ] && realbin=$(readlink -f -- "$target" 2>/dev/null)
-        orig="$clang_dir/.cfx-orig-bin/$(basename -- "$target")"
-        if [ ! -e "$orig" ] && [ ! -L "$orig" ]; then
-            mv -- "$target" "$orig"
-        fi
-        [ -n "$realbin" ] || realbin="$orig"
-        [ -x "$realbin" ] || continue
-        rm -f -- "$target"
-        cat > "$target" <<EOF
-#!/usr/bin/env bash
-exec "$ccache_bin" "$realbin" "\$@"
-EOF
-        chmod +x "$target"
-    done
-    export CCACHE_COMPILERCHECK=content
-    export CCACHE_NOHASHDIR=true
-    export CCACHE_BASEDIR="$WORK_DIR"
-    export CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale
-    export CCACHE_IGNOREOPTIONS=--sysroot*
-    export CCACHE_DIRECT=true
-    export CCACHE_COMPRESSION=true
-    export CCACHE_COMPRESSION_LEVEL=1
-    export CCACHE_MAXSIZE=12G
-    export CCACHE_DIR="$WORK_DIR/.ccache"
-    if "$ccache_bin" --help 2>&1 | grep -qi 'depend'; then
-        export CCACHE_DEPEND=true
-    fi
-    CCACHE_WRAPPED=1
-    info "ccache wrappers installed on $(rel "$clang_dir") toolchain"
-}
-
-restore_ccache_wrappers() {
-    [ -n "${CCACHE_OPT:-}" ] || return 0
-    local clang_dir=$(resolve_clang_dir || true)
-    [ -z "$clang_dir" ] || [ ! -d "$clang_dir/.cfx-orig-bin" ] && return 0
-    local f
-    for f in "$clang_dir/.cfx-orig-bin/"*; do
-        [ -e "$f" ] || continue
-        mv -f -- "$f" "$clang_dir/bin/$(basename -- "$f")"
-    done
-    rm -rf "$clang_dir/.cfx-orig-bin"
 }
 
 fetch_prebuilt_tree() { 
@@ -711,7 +629,6 @@ main() {
             fetch_gcc_host & fetch_pids+=("$!")
         fi
         fetch_gas & fetch_pids+=("$!")
-        fetch_ccache & fetch_pids+=("$!")
         fetch_clang_download && fetch_clang_extract & clang_dl_pid=$!
         wait "$clang_dl_pid" || true
         if wait "$kernel_pid"; then
@@ -730,8 +647,6 @@ main() {
     fi
     apply_defconfig_fragment
     if [ "$SKIP_BUILD" -eq 0 ]; then
-        install_ccache_wrappers
-        trap restore_ccache_wrappers EXIT
         run_build
         collect
         info "done. kernel and artifacts: $(rel "$WORK_DIR/dist")"
