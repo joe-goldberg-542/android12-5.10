@@ -39,7 +39,7 @@ on:
       append_build_env:
         description: 'Extra KEY=VALUE pairs appended to build.config'
         required: false
-        default: "KSU_REQUIRE_PREINIT=1"
+        default: ""
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
@@ -204,25 +204,18 @@ jobs:
       - name: Integrate SuSFS
         run: |
           cd work/common
-          
-          echo "Downloading SuSFS Tarball from GitLab..."
           curl -L -o susfs.tar.gz "https://gitlab.com/simonpunk/susfs4ksu/-/archive/gki-android12-5.10/susfs4ksu-gki-android12-5.10.tar.gz"
-          
           mkdir -p ../susfs4ksu
           tar -xzf susfs.tar.gz -C ../susfs4ksu --strip-components=1
           rm susfs.tar.gz
-
           if [ ! -d "../susfs4ksu/kernel_patches" ]; then
              echo "::error::SuSFS source files missing. Download corrupted!"
              exit 1
           fi
-
-          echo "Successfully Bypassed GitLab limitation!"
-
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-     
+
       - name: Integrate FinaSU
         env:
           GH_TOKEN: ${{ github.token }}
