@@ -204,7 +204,20 @@ jobs:
       - name: Integrate SuSFS
         run: |
           cd work/common
-          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          
+          # Retry loop just in case GitLab server rejects due to heavy load!
+          for i in {1..5}; do
+            git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu && break || \
+            echo "GitLab load error. Retrying $i/5 in 10s..."
+            sleep 10
+          done
+
+          # Double check clone succeeded, else throw warning but dont panic
+          if [ ! -d "../susfs4ksu" ]; then
+            echo "::error::Could not download SuSFS from Gitlab due to extreme Server Load. Cannot proceed!"
+            exit 1
+          fi
+
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
