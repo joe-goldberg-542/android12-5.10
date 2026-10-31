@@ -411,7 +411,7 @@ jobs:
 
       - name: Repack and Sign Boot Image
         env:
-          BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/16oax1feqzx2z9spqkudy/Shinkaiboot.img?rlkey=3fuh9bgja0djrsmutg2rvqo6a&st=cw6rafsz&dl=1"
+          BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/c55ehot7hwvy5thny5w96/lunrisosboot.img?rlkey=ws50c90kw0ch9i9v03w5a952m&st=4t5habkm&dl=1"
         shell: bash
         run: |
           mkdir -p repack/extracted
