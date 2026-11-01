@@ -39,7 +39,7 @@ on:
       append_build_env:
         description: 'Extra KEY=VALUE pairs appended to build.config'
         required: false
-        default: "KSU_REQUIRE_PREINIT=1"
+        default: ""
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
@@ -69,7 +69,6 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       KMI_SYMBOL_LIST_STRICT_MODE: "0"
       UPDATE_SYMBOL_LIST: "0"
-      KSU_REQUIRE_PREINIT: "1"
 
     steps:
       - name: Checkout Repository
