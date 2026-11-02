@@ -215,7 +215,8 @@ jobs:
           cp -r ../susfs4ksu/kernel_patches/fs/* fs/
           cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-
+          echo "CFLAGS_susfs.o += -Wno-unused-function" >> fs/Makefile
+      
       - name: Integrate FinaSU
         env:
           GH_TOKEN: ${{ github.token }}
