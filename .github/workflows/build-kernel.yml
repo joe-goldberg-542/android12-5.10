@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_KSU_HOOK_SUSFS_INLINE=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
 
 permissions:
   contents: write
@@ -119,7 +119,7 @@ jobs:
         run: |
           cd work/common
           LE9UO_COMMITS=$(git log --grep="le9uo" -i --format="%H")
-          
+
           if [ -n "$LE9UO_COMMITS" ]; then
             for commit in $LE9UO_COMMITS; do
               if ! git revert --no-commit "$commit"; then
@@ -135,7 +135,7 @@ jobs:
                 fi
               fi
             done
-            
+
             if ! git diff --cached --quiet; then
               git commit -m "chore: Revert le9uo commits"
             fi
@@ -175,10 +175,51 @@ jobs:
             git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
           fi
 
-      - name: Integrate NoMount
+      - name: Integrate Official KernelSU
         run: |
           cd work/common
-          rm -rf fs/nomount fs/nomount.c fs/nomount.h
+          rm -rf KernelSU FinaSU drivers/kernelsu
+          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+
+          # susfsREADME.md Prerequisite #1: clone Official KernelSU without tag (main)
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+
+      - name: Integrate SuSFS (Official Manual Method)
+        run: |
+          cd work/common
+          rm -rf ../susfs4ksu
+          git clone --depth=1 -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+
+          if [ ! -d "../susfs4ksu/kernel_patches" ]; then
+             echo "::error::SuSFS kernel_patches directory missing!"
+             exit 1
+          fi
+
+          # Step 3: Copy 10_enable_susfs_for_ksu.patch to KernelSU
+          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
+
+          # Step 4, 5, 6: Copy kernel patch, fs/*, and include/linux/*
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch ./
+          cp -R ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -R ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+
+          # Step 7: Patch KernelSU
+          cd ./KernelSU
+          patch -p1 < 10_enable_susfs_for_ksu.patch
+          cd ..
+
+          # Step 8: Patch Kernel
+          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "CFLAGS_susfs.o += -Wno-unused-function" >> ./fs/Makefile
+
+          # Step 11: Delete abi_gki_protected_exports files if present
+          rm -f ./android/abi_gki_protected_exports_aarch64 ./android/abi_gki_protected_exports_x86_64
+
+      - name: Integrate NoMount (Official Manual Method 3)
+        run: |
+          cd work/common
+          rm -rf fs/nomount fs/nomount.c fs/nomount.h ../nomount
           sed -i '/nomount/d' fs/Kconfig
           sed -i '/nomount/d' fs/Makefile
 
@@ -191,106 +232,28 @@ jobs:
 
           git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git ../nomount
 
-          sed -i '$i source "fs/nomount/Kconfig"' fs/Kconfig
+          # 1. Add to fs/Kconfig before the final endmenu
+          awk '
+              /^endmenu/ { last_match = NR }
+              { lines[NR] = $0 }
+              END {
+                  for (i = 1; i <= NR; i++) {
+                      if (i == last_match) print "source \"fs/nomount/Kconfig\""
+                      print lines[i]
+                  }
+              }
+          ' fs/Kconfig > fs/Kconfig.tmp && mv fs/Kconfig.tmp fs/Kconfig
+
+          # 2. Add to fs/Makefile
           echo 'obj-$(CONFIG_NOMOUNT) += nomount/' >> fs/Makefile
 
+          # 3. Copy the necessary files
           mkdir -p fs/nomount
-          if [ -d "../nomount/kernel/src" ]; then
-            cp -rf ../nomount/kernel/src/* fs/nomount/
-          elif [ -d "../nomount/src" ]; then
-            cp -rf ../nomount/src/* fs/nomount/
-          fi
+          cp -f ../nomount/kernel/src/* fs/nomount/
 
-      - name: Integrate SuSFS
+      - name: Configure Defconfig for KernelSU, SuSFS, and NoMount
         run: |
           cd work/common
-          curl -L -o susfs.tar.gz "https://gitlab.com/simonpunk/susfs4ksu/-/archive/gki-android12-5.10/susfs4ksu-gki-android12-5.10.tar.gz"
-          mkdir -p ../susfs4ksu
-          tar -xzf susfs.tar.gz -C ../susfs4ksu --strip-components=1
-          rm susfs.tar.gz
-          if [ ! -d "../susfs4ksu/kernel_patches" ]; then
-             echo "::error::SuSFS source files missing. Download corrupted!"
-             exit 1
-          fi
-          cp -r ../susfs4ksu/kernel_patches/fs/* fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          echo "CFLAGS_susfs.o += -Wno-unused-function" >> fs/Makefile
-      
-      - name: Integrate FinaSU
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd work/common
-          rm -rf KernelSU FinaSU drivers/kernelsu
-          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
-          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
-
-          git clone -b dev https://github.com/LyraVoid/FinaSU.git FinaSU
-
-          # Official FinaSU integration script
-          chmod +x ./FinaSU/kernel/setup.sh
-          ./FinaSU/kernel/setup.sh --dir "$(pwd)/FinaSU"
-
-          mkdir -p /tmp/finasu_ci
-          ARTIFACT_ID=$(gh api "/repos/LyraVoid/FinaSU/actions/artifacts?name=manager&per_page=10" \
-            --jq '.artifacts | map(select(.expired == false)) | .[0].id // empty' 2>/dev/null || true)
-
-          if [ -n "$ARTIFACT_ID" ] && gh api "/repos/LyraVoid/FinaSU/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/finasu_ci/artifact.zip 2>/dev/null; then
-            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          elif curl -fL "https://nightly.link/LyraVoid/FinaSU/workflows/build/dev/manager.zip" -o /tmp/finasu_ci/artifact.zip; then
-            unzip -q -o /tmp/finasu_ci/artifact.zip -d /tmp/finasu_ci/
-          fi
-
-          CI_APK=$(find /tmp/finasu_ci -name "*.apk" | head -n 1)
-          if [ -n "$CI_APK" ] && [ -f "$CI_APK" ]; then
-            echo "Found Manager APK: $CI_APK"
-            mkdir -p "$GITHUB_WORKSPACE/work/dist"
-            cp "$CI_APK" "$GITHUB_WORKSPACE/work/dist/FinaSU-Manager.apk"
-            export APK_TO_SYNC="$CI_APK"
-          else
-            export APK_TO_SYNC=""
-          fi
-
-          python3 - << 'EOF'
-          import os, struct, hashlib
-
-          apk_path = os.environ.get("APK_TO_SYNC", "")
-          expected_size = None
-          expected_hash = None
-
-          if apk_path and os.path.exists(apk_path):
-              with open(apk_path, "rb") as f:
-                  data = f.read()
-              eocd = data.rfind(b"PK\x05\x06")
-              if eocd != -1:
-                  cd_offset = struct.unpack("<I", data[eocd+16:eocd+20])[0]
-                  if data[cd_offset-16:cd_offset] == b"APK Sig Block 42":
-                      block_size = struct.unpack("<Q", data[cd_offset-24:cd_offset-16])[0]
-                      pos = cd_offset - block_size
-                      while pos < cd_offset - 24:
-                          pair_len = struct.unpack("<Q", data[pos:pos+8])[0]
-                          pair_id = struct.unpack("<I", data[pos+8:pos+12])[0]
-                          if pair_id in (0x7109871a, 0xf05368c0):
-                              val = data[pos+12:pos+8+pair_len]
-                              digests_len = struct.unpack("<I", val[12:16])[0]
-                              certs_off = 16 + digests_len
-                              cert_len = struct.unpack("<I", val[certs_off+4:certs_off+8])[0]
-                              cert_bytes = val[certs_off+8:certs_off+8+cert_len]
-                              expected_size = f"0x{cert_len:04x}"
-                              expected_hash = hashlib.sha256(cert_bytes).hexdigest()
-                              break
-                          pos += 8 + pair_len
-
-          if expected_size and expected_hash:
-              print(f"Syncing FinaSU CI APK Signature -> size: {expected_size}, hash: {expected_hash}")
-              env_file = os.environ.get("GITHUB_ENV")
-              if env_file:
-                  with open(env_file, "a") as ef:
-                      ef.write(f"KSU_EXPECTED_SIZE={expected_size}\n")
-                      ef.write(f"KSU_EXPECTED_HASH={expected_hash}\n")
-          EOF
-
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
           CONFIG_KPROBES=y
@@ -300,25 +263,24 @@ jobs:
           CONFIG_KALLSYMS_ALL=y
           CONFIG_EXT4_FS=y
           CONFIG_HEADERS_INSTALL=y
+          CONFIG_OVERLAY_FS=y
           CONFIG_THREAD_INFO_IN_TASK=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
-          CONFIG_KSU_HOOK_SUSFS_INLINE=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=n
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
-          CONFIG_KSU_SUSFS_SUS_MEMFD=y
-          CONFIG_KSU_SUSFS_SUS_PROC_FD_LINK=y
+          CONFIG_NOMOUNT=y
           EOF
 
-          git add arch/arm64/configs/gki_defconfig drivers/Makefile drivers/Kconfig
-          git commit -m "chore: Integrate FinaSU and SuSFS config" || true
+          git add -A
+          git commit -m "chore: Integrate Official KernelSU, SuSFS, and NoMount" || true
 
       - name: Lock UTS_RELEASE Version
         run: |
@@ -327,12 +289,12 @@ jobs:
           K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
           K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
-          
+
           LOCAL_VER="-android12-9"
           CURRENT_BUILD_VERSION="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
-          
+
           sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$CURRENT_BUILD_VERSION\",/g" init/version.c
-          
+
           echo "#!/bin/sh" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
@@ -341,13 +303,13 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/neutron-clang
           cd $GITHUB_WORKSPACE/neutron-clang
-          
+
           curl -sO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
-          
+
           ./antman -S
           ./antman --patch=glibc
-          
+
           echo "$GITHUB_WORKSPACE/neutron-clang/bin" >> $GITHUB_PATH
           echo "CC=clang" >> $GITHUB_ENV
           echo "CXX=clang++" >> $GITHUB_ENV
@@ -365,7 +327,7 @@ jobs:
         run: |
           mkdir -p repack/extracted
           mkdir -p repack/output
-          
+
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg repack/mkbootimg_tool
           git clone --depth=1 https://android.googlesource.com/platform/external/avb repack/avb_tool
 
@@ -453,7 +415,6 @@ jobs:
             work/dist/ikconfig
             work/dist/.config
             work/dist/boot.img
-            work/dist/FinaSU-Manager.apk
           retention-days: 7
 
       - name: Publish Release
@@ -465,22 +426,22 @@ jobs:
           if [ -z "$tag" ]; then
             tag="kernel-$(date -u +%Y%m%d-%H%M)"
           fi
-          
+
           cd "$GITHUB_WORKSPACE/work/dist"
           pkg="$GITHUB_WORKSPACE/work/pkg"
           mkdir -p "$pkg"
           assets=()
-          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img FinaSU-Manager.apk; do
+          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img; do
             [ -f "$f" ] && assets+=("$f")
           done
           tar -I 'zstd -T0' -cf "$pkg/kernel-dist.tar.zst" .
           assets+=("$pkg/kernel-dist.tar.zst")
-          
+
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" --clobber "${assets[@]}"
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with FinaSU + SuSFS. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with Official KernelSU + SuSFS + NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
