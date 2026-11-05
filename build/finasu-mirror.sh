@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KSU_OWNER=${KSU_OWNER:-LyraVoid}
-KSU_REPO=${KSU_REPO:-FinaSU}
-KSU_BRANCH=${KSU_BRANCH:-dev}
+KSU_OWNER=${KSU_OWNER:-tiann}
+KSU_REPO=${KSU_REPO:-KernelSU}
+KSU_BRANCH=${KSU_BRANCH:-main}
 KSU_WANT=${KSU_WANT:-'ksud-*'}
 OUT_DIR=${OUT_DIR:-$PWD/ksu-assets}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
