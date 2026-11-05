@@ -36,8 +36,6 @@ DEFCONFIG_FRAGMENT_EXCLUDE=${DEFCONFIG_FRAGMENT_EXCLUDE:-}
 APPEND_BUILD_ENV=${APPEND_BUILD_ENV:-}
 APPEND_CONFIG=${APPEND_CONFIG:-}
 LTO=${LTO:-full}
-KSU_EXPECTED_SIZE=${KSU_EXPECTED_SIZE:-}
-KSU_EXPECTED_HASH=${KSU_EXPECTED_HASH:-}
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
@@ -390,20 +388,12 @@ verify_build_tools_links() {
 }
 
 write_build_config() {
-    # Note: KSU_REQUIRE_PREINIT=1 is exported inside POST_DEFCONFIG_CMDS AFTER headers_install
-    # so that 'make mrproper' and 'make defconfig' do not fail before ./usr/include is generated.
     cat > "$WORK_DIR/build.config.cloudfox" <<EOF
 export KERNEL_DIR=${KERNEL_DIR}
 . \${ROOT_DIR}/\${KERNEL_DIR}/build.config.gki.aarch64
 
-export POST_DEFCONFIG_CMDS='\${ROOT_DIR}/build/self-heal-config.sh && make -C \${ROOT_DIR}/\${KERNEL_DIR} O=\${OUT_DIR} ARCH=\${ARCH:-arm64} LLVM=1 LLVM_IAS=1 headers_install && export KSU_REQUIRE_PREINIT=1'
+export POST_DEFCONFIG_CMDS='\${ROOT_DIR}/build/self-heal-config.sh && make -C \${ROOT_DIR}/\${KERNEL_DIR} O=\${OUT_DIR} ARCH=\${ARCH:-arm64} LLVM=1 LLVM_IAS=1 headers_install'
 EOF
-    if [ -n "${KSU_EXPECTED_SIZE:-}" ]; then
-        printf 'export KSU_EXPECTED_SIZE=%s\n' "$KSU_EXPECTED_SIZE" >> "$WORK_DIR/build.config.cloudfox"
-    fi
-    if [ -n "${KSU_EXPECTED_HASH:-}" ]; then
-        printf 'export KSU_EXPECTED_HASH=%s\n' "$KSU_EXPECTED_HASH" >> "$WORK_DIR/build.config.cloudfox"
-    fi
     if [ -n "$CLANG_URL" ] || [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
         cat >> "$WORK_DIR/build.config.cloudfox" <<'EOF'
 export HERMETIC_TOOLCHAIN=0
@@ -417,7 +407,7 @@ EOF
         {
             printf '\n# CloudFox addition: caller-appended build env\n'
             for pair in $APPEND_BUILD_ENV; do
-                [ -n "$pair" ] && [ "$pair" != "KSU_REQUIRE_PREINIT=1" ] && printf 'export %s\n' "$pair"
+                [ -n "$pair" ] && printf 'export %s\n' "$pair"
             done
         } >> "$WORK_DIR/build.config.cloudfox"
         ok "caller build env appended"
@@ -583,12 +573,6 @@ run_build() {
     [ -n "$JOBS" ] && export MAKEFLAGS="-j$JOBS"
     
     local host_args=()
-    if [ -n "${KSU_EXPECTED_SIZE:-}" ]; then
-        host_args+=("KSU_EXPECTED_SIZE=${KSU_EXPECTED_SIZE}")
-    fi
-    if [ -n "${KSU_EXPECTED_HASH:-}" ]; then
-        host_args+=("KSU_EXPECTED_HASH=${KSU_EXPECTED_HASH}")
-    fi
     if [ -n "$CLANG_URL" ] || [[ "${CLANG_ASSET:-}" == *"neutron"* ]]; then
         host_args+=(
             "HOSTCC=${CLOUDFOX_HOST_CC:-gcc}"
@@ -602,9 +586,6 @@ run_build() {
     export LTO="${LTO}"
     info "LTO mode set to: $LTO"
     export LLVM=1
-
-    # Ensure KSU_REQUIRE_PREINIT is unset before build.sh starts so mrproper succeeds
-    unset KSU_REQUIRE_PREINIT || true
 
     (cd "$WORK_DIR" && BUILD_CONFIG=$config ./build/build.sh "${host_args[@]}")
 }
