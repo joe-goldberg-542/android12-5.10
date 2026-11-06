@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra CONFIG_* lines for defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=n,CONFIG_KSU=y,CONFIG_KSU_MANUAL_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KSU=y,CONFIG_KSU_MANUAL_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
 
 permissions:
   contents: write
@@ -475,12 +475,7 @@ jobs:
 
       - name: Update Kernel Config
         run: |
-          find "$GITHUB_WORKSPACE/build/fragments" -type f -name "*.config" \
-            -exec sed -i '/CONFIG_KALLSYMS_ALL/d' {} + 2>/dev/null || true
-
           cd work/common
-          sed -i '/CONFIG_KALLSYMS_ALL/d' arch/arm64/configs/gki_defconfig
-
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
@@ -488,7 +483,6 @@ jobs:
           CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
           CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
           CONFIG_KALLSYMS=y
-          CONFIG_KALLSYMS_ALL=n
           CONFIG_EXT4_FS=y
           CONFIG_HEADERS_INSTALL=y
           CONFIG_OVERLAY_FS=y
