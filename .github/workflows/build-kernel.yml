@@ -43,7 +43,7 @@ on:
       append_config:
         description: 'Extra literal CONFIG_* lines injected into the defconfig'
         required: false
-        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KALLSYMS_ALL=y,CONFIG_KSU=y,CONFIG_KPROBES=y,CONFIG_HAVE_KPROBES=y,CONFIG_KPROBE_EVENTS=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,# CONFIG_KALLSYMS_ALL is not set,CONFIG_KSU=y,CONFIG_KSU_MANUAL_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
 
 permissions:
   contents: write
@@ -175,17 +175,17 @@ jobs:
             git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
           fi
 
-      - name: Integrate Official KernelSU
+      - name: Integrate BakaSU
         run: |
           cd work/common
-          rm -rf KernelSU FinaSU drivers/kernelsu
+          rm -rf KernelSU FinaSU BakaSU drivers/kernelsu
           sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
           sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
 
-          # susfsREADME.md Prerequisite #1: clone Official KernelSU without tag (main)
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          # Clone BakaSU (already includes KernelSU-side SuSFS support)
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
 
-      - name: Integrate SuSFS (Official Manual Method)
+      - name: Integrate SuSFS (Kernel-side Patch for BakaSU)
         run: |
           cd work/common
           rm -rf ../susfs4ksu
@@ -196,25 +196,170 @@ jobs:
              exit 1
           fi
 
-          # Step 3: Copy 10_enable_susfs_for_ksu.patch to KernelSU
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
-
-          # Step 4, 5, 6: Copy kernel patch, fs/*, and include/linux/*
+          # Copy kernel patch, fs/*, and include/linux/*
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch ./
           cp -R ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp -R ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
 
-          # Step 7: Patch KernelSU
-          cd ./KernelSU
-          patch -p1 < 10_enable_susfs_for_ksu.patch
-          cd ..
-
-          # Step 8: Patch Kernel
+          # Patch Kernel (Note: BakaSU already has KernelSU-side SuSFS built-in, so 10_enable_susfs_for_ksu.patch is not needed)
           patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch
           echo "CFLAGS_susfs.o += -Wno-unused-function" >> ./fs/Makefile
 
-          # Step 11: Delete abi_gki_protected_exports files if present
+          # Delete abi_gki_protected_exports files if present
           rm -f ./android/abi_gki_protected_exports_aarch64 ./android/abi_gki_protected_exports_x86_64
+
+      - name: Apply BakaSU Manual Hooks & SELinux Static Exports (No KALLSYMS_ALL)
+        run: |
+          cd work/common
+          python3 - << 'EOF'
+          import re
+          from pathlib import Path
+
+          def patch_file(path_str, fn):
+              p = Path(path_str)
+              if not p.exists():
+                  raise SystemExit(f"File not found: {path_str}")
+              orig = p.read_text()
+              updated = fn(orig)
+              if orig == updated:
+                  print(f"[WARN] No changes made to {path_str} (already patched or pattern mismatch)")
+              else:
+                  p.write_text(updated)
+                  print(f"[OK] Patched {path_str}")
+
+          # --- 1. fs/stat.c ---
+          def patch_stat(s):
+              if "ksu_handle_newfstat_ret" not in s:
+                  extern_block = (
+                      "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                      "__attribute__((hot))\n"
+                      "extern int ksu_handle_stat(int *dfd, const char __user **filename_user,\n"
+                      "\t\t\t\tint *flags);\n\n"
+                      "extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n"
+                      "#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\n"
+                      "extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n"
+                      "#endif\n"
+                      "#endif\n\n"
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE4\(newfstatat,)',
+                      extern_block + r'\1',
+                      s, count=1
+                  )
+                  s = re.sub(
+                      r'(\terror = vfs_fstatat\(dfd, filename, &stat, flag\);)',
+                      '#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_stat(&dfd, &filename, &flag);\n#endif\n\\1',
+                      s
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE2\(newfstat,[\s\S]*?cp_new_stat\(&stat, statbuf\);\n)',
+                      r'\1\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_newfstat_ret(&fd, &statbuf);\n#endif\n',
+                      s, count=1
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE2\(fstat64,[\s\S]*?cp_new_stat64\(&stat, statbuf\);\n)',
+                      r'\1\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_fstat64_ret(&fd, &statbuf);\n#endif\n',
+                      s, count=1
+                  )
+              return s
+
+          # --- 2. fs/exec.c ---
+          def patch_exec(s):
+              if "ksu_handle_post_execveat" not in s:
+                  extern_block = (
+                      "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                      "__attribute__((hot))\n"
+                      "extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,\n"
+                      "\t\t\t\tvoid *argv, void *envp, int *flags);\n"
+                      "__attribute__((hot))\n"
+                      "extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr,\n"
+                      "\t\t\t\tvoid *argv, void *envp, int *flags, int *retval);\n"
+                      "#endif\n\n"
+                  )
+                  s = re.sub(
+                      r'(static int do_execveat_common\(int fd, struct filename \*filename,)',
+                      extern_block + r'\1',
+                      s, count=1
+                  )
+                  s = re.sub(
+                      r'(static int do_execveat_common\([\s\S]*?)(\tif \(IS_ERR\(filename\)\))',
+                      r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif\n\n\2',
+                      s, count=1
+                  )
+                  s = re.sub(
+                      r'(static int do_execveat_common\([\s\S]*?out_ret:\n)',
+                      r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);\n#endif\n',
+                      s, count=1
+                  )
+              return s
+
+          # --- 3. fs/open.c ---
+          def patch_open(s):
+              if "ksu_handle_faccessat" not in s:
+                  extern_block = (
+                      "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                      "__attribute__((hot))\n"
+                      "extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,\n"
+                      "\t\t\t\tint *mode, int *flags);\n"
+                      "#endif\n\n"
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE3\(faccessat, int, dfd, const char __user \*, filename, int, mode\)\n\{\n)',
+                      extern_block + r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n',
+                      s, count=1
+                  )
+              return s
+
+          # --- 4. kernel/reboot.c ---
+          def patch_reboot(s):
+              if "ksu_handle_sys_reboot" not in s:
+                  extern_block = (
+                      "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                      "extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n"
+                      "#endif\n\n"
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE4\(reboot,)',
+                      extern_block + r'\1',
+                      s, count=1
+                  )
+                  s = re.sub(
+                      r'(SYSCALL_DEFINE4\(reboot,[\s\S]*?)(\tif \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\))',
+                      r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n\2',
+                      s, count=1
+                  )
+              return s
+
+          # --- 5. SELinux Static Symbol Exports (Required when CONFIG_KALLSYMS_ALL is disabled) ---
+          def patch_selinuxfs(s):
+              s = re.sub(
+                  r'static\s+(ssize_t\s+\(\*write_op\[\]\)\(struct file \*, char \*, size_t\)\s*=\s*\{)',
+                  r'\1', s
+              )
+              s = re.sub(
+                  r'static\s+(const\s+struct\s+file_operations\s+sel_handle_status_ops\s*=\s*\{)',
+                  r'\1', s
+              )
+              return s
+
+          def patch_selinux_services(s):
+              s = re.sub(
+                  r'static\s+(void\s+security_dump_masked_av\s*\()',
+                  r'\1', s
+              )
+              s = re.sub(
+                  r'static\s+(void\s+context_struct_compute_av\s*\()',
+                  r'\1', s
+              )
+              return s
+
+          patch_file("fs/stat.c", patch_stat)
+          patch_file("fs/exec.c", patch_exec)
+          patch_file("fs/open.c", patch_open)
+          patch_file("kernel/reboot.c", patch_reboot)
+          patch_file("security/selinux/selinuxfs.c", patch_selinuxfs)
+          patch_file("security/selinux/ss/services.c", patch_selinux_services)
+          EOF
 
       - name: Integrate NoMount (Official Manual Method 3)
         run: |
@@ -251,16 +396,22 @@ jobs:
           mkdir -p fs/nomount
           cp -f ../nomount/kernel/src/* fs/nomount/
 
-      - name: Configure Defconfig for KernelSU, SuSFS, and NoMount
+      - name: Configure Defconfig for BakaSU, SuSFS, and NoMount (Without KALLSYMS_ALL)
         run: |
+          # Ensure CONFIG_KALLSYMS_ALL is removed from any builder fragments
+          find "$GITHUB_WORKSPACE/build/fragments" -type f -name "*.config" -exec sed -i '/CONFIG_KALLSYMS_ALL/d' {} + 2>/dev/null || true
+
           cd work/common
+          sed -i '/CONFIG_KALLSYMS_ALL/d' arch/arm64/configs/gki_defconfig
+
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           CONFIG_KSU=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
           CONFIG_KALLSYMS=y
-          CONFIG_KALLSYMS_ALL=y
+          # CONFIG_KALLSYMS_ALL is not set
           CONFIG_EXT4_FS=y
           CONFIG_HEADERS_INSTALL=y
           CONFIG_OVERLAY_FS=y
@@ -280,7 +431,7 @@ jobs:
           EOF
 
           git add -A
-          git commit -m "chore: Integrate Official KernelSU, SuSFS, and NoMount" || true
+          git commit -m "chore: Integrate BakaSU (Manual Hooks), SuSFS, and NoMount" || true
 
       - name: Lock UTS_RELEASE Version
         run: |
@@ -442,6 +593,6 @@ jobs:
           else
             gh release create "$tag" \
               --title "Kernel GKI $tag" \
-              --notes "Built with Official KernelSU + SuSFS + NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              --notes "Built with BakaSU (Manual Hooks) + SuSFS + NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
               "${assets[@]}"
           fi
