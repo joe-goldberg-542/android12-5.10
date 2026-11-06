@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KSU_OWNER=${KSU_OWNER:-tiann}
-KSU_REPO=${KSU_REPO:-KernelSU}
+KSU_OWNER=${KSU_OWNER:-Baka-SU}
+KSU_REPO=${KSU_REPO:-BakaSU}
 KSU_BRANCH=${KSU_BRANCH:-main}
 KSU_WANT=${KSU_WANT:-'ksud-*'}
 OUT_DIR=${OUT_DIR:-$PWD/ksu-assets}
