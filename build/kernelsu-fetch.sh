@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_NAME=${0##*/}
 
 # ==> SETTINGS FOR OFFICIAL KERNELSU INTEGRATION <==
-KSU_OWNER=${KSU_OWNER:-tiann}
-KSU_REPO=${KSU_REPO:-KernelSU}
+KSU_OWNER=${KSU_OWNER:-Baka-SU}
+KSU_REPO=${KSU_REPO:-BakaSU}
 KSU_BRANCH=${KSU_BRANCH:-main}
 KSUD_TARGETS=${KSUD_TARGETS:-"aarch64-linux-android armv7-linux-androideabi"}
 KSU_PREBUILT_BASE=${KSU_PREBUILT_BASE:-}
