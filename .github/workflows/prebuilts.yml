@@ -1,208 +1,673 @@
-name: publish-prebuilts
-"on":
+name: Build Kernel
+
+on:
   workflow_dispatch:
     inputs:
-      force:
-        description: Re-fetch and re-upload every asset even if already released
+      publish_release:
+        description: 'Publish the build as a GitHub release'
         type: boolean
-        required: false
-        default: false
+        default: true
       release_tag:
-        description: Release tag for the prebuilt components (kept separate from kernel release tags)
+        description: 'Release tag'
         required: false
-        default: prebuilts
+        default: ""
+      kernel_repo:
+        description: 'Kernel source repository'
+        required: false
+        default: "https://github.com/Steambot12/Templar-Kernel-GKI-5.10"
+      kernel_branch:
+        description: 'Kernel source branch'
+        required: false
+        default: "Linux7-Staging"
+      kernel_commit:
+        description: 'Kernel source commit'
+        required: false
+        default: ""
       clang_version:
-        description: Clang toolchain version
+        description: 'Clang toolchain version'
         required: false
         type: choice
         options:
           - clang 19
           - clang 14
-        default: "clang 19"
+          - neutron clang 24
+        default: "neutron clang 24"
+      defconfig_fragment_exclude:
+        description: 'Defconfig fragments to exclude'
+        required: false
+        default: ""
+      append_build_env:
+        description: 'Extra KEY=VALUE pairs for build.config'
+        required: false
+        default: ""
+      append_config:
+        description: 'Extra CONFIG_* lines for defconfig'
+        required: false
+        default: "CONFIG_LRU_GEN_STATS=n,CONFIG_LRU_GEN_ENABLED=y,CONFIG_LRU_GEN=y,CONFIG_SCHED_BORE=n,CONFIG_KALLSYMS=y,CONFIG_KSU=y,CONFIG_KSU_MANUAL_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y,CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y,CONFIG_EXT4_FS=y,CONFIG_HEADERS_INSTALL=y,CONFIG_THREAD_INFO_IN_TASK=y,CONFIG_KSU_SUSFS=y,CONFIG_OVERLAY_FS=y,CONFIG_NOMOUNT=y"
 
 permissions:
   contents: write
+  actions: write
+
+concurrency:
+  group: kernel-build-${{ github.event.inputs.release_tag || 'default' }}
+  cancel-in-progress: false
 
 jobs:
-  prebuilts:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
     env:
+      KERNEL_REPO: ${{ inputs.kernel_repo }}
+      KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+      KERNEL_COMMIT: ${{ inputs.kernel_commit }}
+      CLANG_ASSET: ${{ fromJSON('{"clang 14":"clang-r450784e-linux-x86.tar.zst","clang 19":"clang-r536225-linux-x86.tar.zst","neutron clang 24":"neutron-clang-24"}')[inputs.clang_version] }}
+      DEFCONFIG_FRAGMENT_EXCLUDE: ${{ inputs.defconfig_fragment_exclude }}
+      APPEND_BUILD_ENV: ${{ inputs.append_build_env }}
+      APPEND_CONFIG: ${{ inputs.append_config }}
       RELEASE_TAG: ${{ inputs.release_tag }}
-      FORCE: ${{ inputs.force && '1' || '0' }}
-      KBT_ASSET: kernel-build-tools.tar.zst
-      BUILDTOOLS_ASSET: build-tools.tar.zst
+      GITHUB_TOKEN: ${{ github.token }}
+      KMI_SYMBOL_LIST_STRICT_MODE: "0"
+      UPDATE_SYMBOL_LIST: "0"
+
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
 
-      - name: Resolve clang profile
+      - name: Free Disk Space
         run: |
-          set -euo pipefail
-          case "${{ inputs.clang_version }}" in
-            "clang 14")
-              clang_branch=android14-dev
-              clang_version=clang-r450784e
-              ;;
-            "clang 19")
-              clang_branch=master
-              clang_version=clang-r536225
-              ;;
-            *)
-              echo "unknown clang version: ${{ inputs.clang_version }}" >&2
-              exit 1
-              ;;
-          esac
-          echo "CLANG_BRANCH=$clang_branch" >> "$GITHUB_ENV"
-          echo "CLANG_VERSION=$clang_version" >> "$GITHUB_ENV"
-          echo "TOOLS_BRANCH=master" >> "$GITHUB_ENV"
-          echo "CLANG_DIR_NAME=clang-r416183b" >> "$GITHUB_ENV"
-          echo "CLANG_ASSET=$clang_version-linux-x86.tar.zst" >> "$GITHUB_ENV"
-          echo "resolved clang: branch=$clang_branch version=$clang_version asset=$clang_version-linux-x86.tar.zst"
+          if [ -f "build/free-disk-space.sh" ]; then
+            sudo bash build/free-disk-space.sh
+          fi
+          df -h
 
-      - name: Already released?
-        id: released
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Install Dependencies
         run: |
-          names=$(gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' 2>/dev/null || true)
-          echo "assets: $names"
-          for a in "$CLANG_ASSET" "$KBT_ASSET" "$BUILDTOOLS_ASSET"; do
-            if [ "$FORCE" = "1" ] || ! echo "$names" | grep -qx "$a"; then
-              echo "$a" >> /tmp/wanted
-            fi
-          done
-          echo "wanted: $(cat /tmp/wanted 2>/dev/null || echo none)"
-          if [ -s /tmp/wanted ]; then
-            echo "wanted=work pending" >> "$GITHUB_OUTPUT"
-          else
-            echo "wanted=nothing to do" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdw-dev gh bc bison flex libssl-dev libelf-dev \
+            dwarves cpio curl zstd lz4 cmake zlib1g-dev zip unzip
+          pip install lxml
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "*"
+          git config --global user.email "joe_goldberg_542@protonmail.com"
+          git config --global user.name "joe-goldberg-542"
+
+      - name: Setup Swap Space
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 15G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=15360
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Clone Kernel Source
+        run: |
+          mkdir -p work
+          git clone -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} work/common
+          cd work/common
+
+          if [ -n "${{ env.KERNEL_COMMIT }}" ]; then
+            git checkout ${{ env.KERNEL_COMMIT }}
           fi
 
-      - name: Fetch prebuilts from Google ACK (parallel)
-        if: steps.released.outputs.wanted != 'nothing to do'
+      - name: Revert Conflicting Commits
         run: |
-          set -euo pipefail
-          fetch_clang() {
-            if [ "$FORCE" != "1" ] && ! grep -qx "$CLANG_ASSET" /tmp/wanted; then
-              echo "clang already released, skipping"
-              return 0
-            fi
-            git clone -q --depth 1 --filter=blob:none --sparse \
-              -b "$CLANG_BRANCH" \
-              https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-src \
-              || { rm -rf clang-src; git clone -q --depth 1 -b "$CLANG_BRANCH" \
-                   https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-src; }
-            git -C clang-src sparse-checkout set "$CLANG_VERSION"
-            test -x "clang-src/$CLANG_VERSION/bin/clang"
-            if [ "$CLANG_DIR_NAME" != "$CLANG_VERSION" ]; then
-              mv "clang-src/$CLANG_VERSION" "clang-src/$CLANG_DIR_NAME"
-            fi
-            tar --exclude=.git -C clang-src -I 'zstd -T0' -cf "$CLANG_ASSET" "$CLANG_DIR_NAME"
-            ls -la "$CLANG_ASSET"
-          }
-          fetch_kbt() {
-            if [ "$FORCE" != "1" ] && ! grep -qx "$KBT_ASSET" /tmp/wanted; then
-              echo "kernel-build-tools already released, skipping"
-              return 0
-            fi
-            git clone -q --depth 1 --filter=blob:none --sparse \
-              -b "$TOOLS_BRANCH" \
-              https://android.googlesource.com/kernel/prebuilts/build-tools kbt \
-              && git -C kbt sparse-checkout set linux-x86 \
-              || { rm -rf kbt; git clone -q --depth 1 -b "$TOOLS_BRANCH" \
-                   https://android.googlesource.com/kernel/prebuilts/build-tools kbt; }
-            test -x kbt/linux-x86/bin/dtc
-            tar --exclude=.git -C kbt -I 'zstd -T0' -cf "$KBT_ASSET" .
-            ls -la "$KBT_ASSET"
-          }
-          fetch_buildtools() {
-            if [ "$FORCE" != "1" ] && ! grep -qx "$BUILDTOOLS_ASSET" /tmp/wanted; then
-              echo "build-tools already released, skipping"
-              return 0
-            fi
-            git clone -q --depth 1 --filter=blob:none --sparse \
-              -b "$TOOLS_BRANCH" \
-              https://android.googlesource.com/platform/prebuilts/build-tools build-tools-src \
-              && git -C build-tools-src sparse-checkout set linux-x86 path/linux-x86 common/bison \
-              || { rm -rf build-tools-src; git clone -q --depth 1 -b "$TOOLS_BRANCH" \
-                   https://android.googlesource.com/platform/prebuilts/build-tools build-tools-src; }
-            test -x build-tools-src/linux-x86/bin/make
-            test -x build-tools-src/path/linux-x86/python3
-            tar --exclude=.git -C build-tools-src -I 'zstd -T0' -cf "$BUILDTOOLS_ASSET" .
-            ls -la "$BUILDTOOLS_ASSET"
-          }
-          pids=()
-          fetch_clang & pids+=("$!")
-          fetch_kbt & pids+=("$!")
-          fetch_buildtools & pids+=("$!")
-          rc=0
-          for pid in "${pids[@]}"; do
-            wait "$pid" || rc=1
-          done
-          [ "$rc" -eq 0 ] || exit 1
+          cd work/common
+          LE9UO_COMMITS=$(git log --grep="le9uo" -i --format="%H")
 
-      - name: Publish release (uploads only on-disk assets)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          assets=()
-          for f in *.tar.zst; do
-            [ -f "$f" ] && assets+=("$f")
-          done
-          if [ "${#assets[@]}" -eq 0 ]; then
-            echo "no assets to upload"
-            exit 0
-          fi
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --latest=false \
-              --title "Kernel build prebuilts" \
-              --notes "Prebuilt components consumed by build-kernel.sh, fetched from the Google ACK sources (clang, kernel-build-tools and build-tools). " \
-              "${assets[@]}" >/dev/null 2>&1 || true
-          fi
-          gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
-          echo "release $RELEASE_TAG updated"
+          if [ -n "$LE9UO_COMMITS" ]; then
+            for commit in $LE9UO_COMMITS; do
+              if ! git revert --no-commit "$commit"; then
+                for conf in arch/arm64/configs/gki_defconfig arch/arm64/configs/*defconfig; do
+                  if [ -f "$conf" ]; then
+                    git checkout HEAD -- "$conf" 2>/dev/null || true
+                    git add "$conf" 2>/dev/null || true
+                  fi
+                done
 
-  finasu:
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      FORCE: ${{ inputs.force && '1' || '0' }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Mirror flash tools (ksud/FinaSU) binaries
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [ "$FORCE" != "1" ]; then
-            existing=$(gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' 2>/dev/null || true)
-            needed="ksu-ksud-aarch64-linux-android.zip ksu-ksud-armv7-linux-androideabi.zip"
-            if [ -n "$existing" ]; then
-              missing=$(for a in $needed; do printf '%s\n' "$existing" | grep -qx "$a" || echo "$a"; done)
-              if [ -z "$missing" ]; then
-                echo "Flash tool assets already released, skipping (set force to re-mirror)"
-                exit 0
+                if git diff --name-only --diff-filter=U | grep -q .; then
+                  git revert --abort
+                fi
               fi
-              echo "missing assets: $missing"
+            done
+
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: Revert le9uo commits"
             fi
           fi
-          ./build/finasu-mirror.sh
 
-      - name: Publish FinaSU tools to prebuilts release
+      - name: Apply Custom Patches
+        run: |
+          cd work/common
+          PATCH_DIRS=(
+            "$GITHUB_WORKSPACE/.github/workflows/patches"
+            "$GITHUB_WORKSPACE/patches"
+          )
+
+          shopt -s nullglob
+          APPLIED_COUNT=0
+
+          for dir in "${PATCH_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              for patch_file in "$dir"/*.patch; do
+                if git apply --check "$patch_file" 2>/dev/null; then
+                  git apply "$patch_file"
+                elif git apply --3way "$patch_file" 2>/dev/null; then
+                  :
+                elif patch -p1 --forward --fuzz=3 < "$patch_file"; then
+                  :
+                else
+                  echo "::error::Failed to apply patch: $(basename "$patch_file")"
+                  exit 1
+                fi
+                APPLIED_COUNT=$((APPLIED_COUNT + 1))
+              done
+            fi
+          done
+
+          if [ "$APPLIED_COUNT" -gt 0 ]; then
+            git add -A
+            git commit -m "chore: Apply $APPLIED_COUNT custom patch(es)" || true
+          fi
+
+      - name: Setup BakaSU
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --latest=false \
-              --title "Kernel build prebuilts" \
-              --notes "Prebuilt components consumed by build-kernel workflow: clang toolchain, kernel-build-tools, build-tools and mirrored FinaSU (ksud) flash binaries (arm64/armv7) to pack self-flashing boot kernels." || true
+          cd work/common
+          rm -rf KernelSU FinaSU BakaSU drivers/kernelsu
+          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash -s main
+
+          cd KernelSU
+          git config --local remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+          git fetch --quiet origin --prune
+          git checkout -B main origin/main
+
+          python3 - << 'EOF'
+          import json
+          import os
+          import subprocess
+          import time
+          import urllib.request
+
+          OWNER = "Baka-SU"
+          REPO = "BakaSU"
+          BASE = "main"
+          CUTOFF = int(time.time()) - (90 * 86400)
+          TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+
+          def gh_api(path):
+              url = f"https://api.github.com/repos/{OWNER}/{REPO}{path}"
+              headers = {
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "BakaSU-Merger"
+              }
+              if TOKEN:
+                  headers["Authorization"] = f"Bearer {TOKEN}"
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  return json.loads(resp.read().decode())
+
+          def run_git(*args):
+              return subprocess.run(["git", *args], capture_output=True, text=True)
+
+          drafts = set()
+          try:
+              for pr in gh_api("/pulls?state=open&per_page=100"):
+                  ref = pr.get("head", {}).get("ref")
+                  if ref and pr.get("draft", False):
+                      drafts.add(ref)
+          except Exception as e:
+              print(f"[WARN] PR fetch error: {e}")
+
+          def is_green(sha):
+              try:
+                  runs = gh_api(f"/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
+                  if not runs:
+                      return False
+                  ok = False
+                  for r in runs:
+                      if r.get("status") != "completed":
+                          return False
+                      c = r.get("conclusion")
+                      if c == "success":
+                          ok = True
+                      elif c not in ("skipped", "neutral"):
+                          return False
+                  return ok
+              except Exception:
+                  return False
+
+          fmt = "%(refname:short)|%(objectname)|%(committerdate:unix)"
+          refs = run_git(
+              "for-each-ref", "--sort=-committerdate", f"--format={fmt}", "refs/remotes/origin/"
+          ).stdout.strip().splitlines()
+
+          merged = []
+          for line in refs:
+              if "|" not in line:
+                  continue
+              ref, sha, ts = line.split("|", 2)
+              branch = ref.replace("origin/", "", 1)
+
+              if branch in (BASE, "HEAD") or int(ts) < CUTOFF:
+                  continue
+
+              ahead_str = run_git("rev-list", "--count", f"origin/{BASE}..{ref}").stdout.strip()
+              ahead = int(ahead_str) if ahead_str.isdigit() else 0
+              if ahead <= 0 or branch in drafts or not is_green(sha):
+                  continue
+
+              res = run_git("merge", "--no-edit", "-m", f"Merge {branch} into {BASE}", ref)
+              if res.returncode == 0:
+                  merged.append(branch)
+                  print(f"[OK] Merged into {BASE}: {branch} (+{ahead})")
+              else:
+                  run_git("merge", "--abort")
+                  print(f"[SKIP] Conflict: {branch}")
+
+          print(f"Total dynamic branches merged into {BASE}: {len(merged)}")
+          EOF
+
+      - name: Integrate SuSFS
+        run: |
+          cd work/common
+          rm -rf ../susfs4ksu
+          git clone --depth=1 -b gki-android12-5.10 \
+            https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+
+          if [ ! -d "../susfs4ksu/kernel_patches" ]; then
+             echo "::error::SuSFS kernel_patches directory missing!"
+             exit 1
           fi
+
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch ./
+          cp -R ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -R ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+
+          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "CFLAGS_susfs.o += -Wno-unused-function" >> ./fs/Makefile
+
+          rm -f ./android/abi_gki_protected_exports_aarch64 \
+                ./android/abi_gki_protected_exports_x86_64
+
+      - name: Apply Manual Hooks
+        run: |
+          cd work/common
+          python3 - << 'EOF'
+          import re
+          from pathlib import Path
+
+          def patch_file(path_str, fn):
+              p = Path(path_str)
+              if not p.exists():
+                  raise SystemExit(f"Missing file: {path_str}")
+              orig = p.read_text()
+              updated = fn(orig)
+              if orig != updated:
+                  p.write_text(updated)
+                  print(f"[OK] Patched {path_str}")
+
+          def patch_stat(s):
+              if "ksu_handle_newfstat_ret" in s:
+                  return s
+              ext = (
+                  "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_stat(int *dfd, const char __user **filename_user,\n"
+                  "\t\t\t\tint *flags);\n\n"
+                  "extern void ksu_handle_newfstat_ret(unsigned int *fd, "
+                  "struct stat __user **statbuf_ptr);\n"
+                  "#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\n"
+                  "extern void ksu_handle_fstat64_ret(unsigned long *fd, "
+                  "struct stat64 __user **statbuf_ptr);\n"
+                  "#endif\n"
+                  "#endif\n\n"
+              )
+              s = re.sub(r'(SYSCALL_DEFINE4\(newfstatat,)', ext + r'\1', s, count=1)
+              s = re.sub(
+                  r'(\terror = vfs_fstatat\(dfd, filename, &stat, flag\);)',
+                  '#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  '\tksu_handle_stat(&dfd, &filename, &flag);\n'
+                  '#endif\n\\1',
+                  s
+              )
+              s = re.sub(
+                  r'(SYSCALL_DEFINE2\(newfstat,[\s\S]*?cp_new_stat\(&stat, statbuf\);\n)',
+                  r'\1\n#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_newfstat_ret(&fd, &statbuf);\n#endif\n',
+                  s, count=1
+              )
+              s = re.sub(
+                  r'(SYSCALL_DEFINE2\(fstat64,[\s\S]*?cp_new_stat64\(&stat, statbuf\);\n)',
+                  r'\1\n#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_fstat64_ret(&fd, &statbuf);\n#endif\n',
+                  s, count=1
+              )
+              return s
+
+          def patch_exec(s):
+              if "ksu_handle_post_execveat" in s:
+                  return s
+              ext = (
+                  "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,\n"
+                  "\t\t\t\tvoid *argv, void *envp, int *flags);\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr,\n"
+                  "\t\t\t\tvoid *argv, void *envp, int *flags, int *retval);\n"
+                  "#endif\n\n"
+              )
+              s = re.sub(
+                  r'(static int do_execveat_common\(int fd, struct filename \*filename,)',
+                  ext + r'\1', s, count=1
+              )
+              s = re.sub(
+                  r'(static int do_execveat_common\([\s\S]*?)(\tif \(IS_ERR\(filename\)\))',
+                  r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n'
+                  r'#endif\n\n\2',
+                  s, count=1
+              )
+              s = re.sub(
+                  r'(static int do_execveat_common\([\s\S]*?out_ret:\n)',
+                  r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);\n'
+                  r'#endif\n',
+                  s, count=1
+              )
+              return s
+
+          def patch_open(s):
+              if "ksu_handle_faccessat" in s:
+                  return s
+              ext = (
+                  "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,\n"
+                  "\t\t\t\tint *mode, int *flags);\n"
+                  "#endif\n\n"
+              )
+              return re.sub(
+                  r'(SYSCALL_DEFINE3\(faccessat, int, dfd, const char __user \*, filename, int, mode\)\n\{\n)',
+                  ext + r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);\n#endif\n',
+                  s, count=1
+              )
+
+          def patch_reboot(s):
+              if "ksu_handle_sys_reboot" in s:
+                  return s
+              ext = (
+                  "#ifdef CONFIG_KSU_MANUAL_HOOK\n"
+                  "extern int ksu_handle_sys_reboot(int magic1, int magic2, "
+                  "unsigned int cmd, void __user **arg);\n"
+                  "#endif\n\n"
+              )
+              s = re.sub(r'(SYSCALL_DEFINE4\(reboot,)', ext + r'\1', s, count=1)
+              return re.sub(
+                  r'(SYSCALL_DEFINE4\(reboot,[\s\S]*?)(\tif \(!ns_capable\(pid_ns->user_ns, CAP_SYS_BOOT\)\))',
+                  r'\1#ifdef CONFIG_KSU_MANUAL_HOOK\n'
+                  r'\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);\n#endif\n\2',
+                  s, count=1
+              )
+
+          def patch_selinuxfs(s):
+              s = re.sub(
+                  r'static\s+(ssize_t\s+\(\*write_op\[\]\)\(struct file \*, char \*, size_t\)\s*=\s*\{)',
+                  r'\1', s
+              )
+              return re.sub(
+                  r'static\s+(const\s+struct\s+file_operations\s+sel_handle_status_ops\s*=\s*\{)',
+                  r'\1', s
+              )
+
+          def patch_selinux_services(s):
+              s = re.sub(r'static\s+(void\s+security_dump_masked_av\s*\()', r'\1', s)
+              return re.sub(r'static\s+(void\s+context_struct_compute_av\s*\()', r'\1', s)
+
+          patch_file("fs/stat.c", patch_stat)
+          patch_file("fs/exec.c", patch_exec)
+          patch_file("fs/open.c", patch_open)
+          patch_file("kernel/reboot.c", patch_reboot)
+          patch_file("security/selinux/selinuxfs.c", patch_selinuxfs)
+          patch_file("security/selinux/ss/services.c", patch_selinux_services)
+          EOF
+
+      - name: Integrate NoMount
+        run: |
+          cd work/common
+          rm -rf fs/nomount fs/nomount.c fs/nomount.h ../nomount
+          sed -i '/nomount/d' fs/Kconfig
+          sed -i '/nomount/d' fs/Makefile
+
+          for f in fs/d_path.c fs/namei.c fs/stat.c fs/statfs.c fs/readdir.c fs/proc/task_mmu.c; do
+            sed -i '/nomount/d' "$f" 2>/dev/null || true
+          done
+
+          git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git ../nomount
+
+          awk '
+              /^endmenu/ { last_match = NR }
+              { lines[NR] = $0 }
+              END {
+                  for (i = 1; i <= NR; i++) {
+                      if (i == last_match) print "source \"fs/nomount/Kconfig\""
+                      print lines[i]
+                  }
+              }
+          ' fs/Kconfig > fs/Kconfig.tmp && mv fs/Kconfig.tmp fs/Kconfig
+
+          echo 'obj-$(CONFIG_NOMOUNT) += nomount/' >> fs/Makefile
+          mkdir -p fs/nomount
+          cp -f ../nomount/kernel/src/* fs/nomount/
+
+      - name: Update Kernel Config
+        run: |
+          cd work/common
+          cat << 'EOF' >> arch/arm64/configs/gki_defconfig
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+          CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+          CONFIG_KALLSYMS=y
+          CONFIG_EXT4_FS=y
+          CONFIG_HEADERS_INSTALL=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_THREAD_INFO_IN_TASK=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_NOMOUNT=y
+          EOF
+
+          git add -A
+          git commit -m "chore: Update kernel configuration" || true
+
+      - name: Set Kernel Version
+        run: |
+          cd work/common
+          K_VER=$(grep '^VERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_PATCH=$(grep '^PATCHLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_SUB=$(grep '^SUBLEVEL = ' Makefile | tr -d ' ' | cut -d= -f2)
+          K_EXTRA=$(grep '^EXTRAVERSION = ' Makefile | tr -d ' ' | cut -d= -f2)
+
+          LOCAL_VER="-android12-9"
+          BUILD_VER="${K_VER}.${K_PATCH}.${K_SUB}${K_EXTRA}${LOCAL_VER}"
+
+          sed -i "s/\.release.*=.*UTS_RELEASE,/.release\t= \"$BUILD_VER\",/g" init/version.c
+
+          true > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+
+      - name: Setup Toolchain
+        if: ${{ inputs.clang_version == 'neutron clang 24' }}
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/neutron-clang
+          cd $GITHUB_WORKSPACE/neutron-clang
+
+          curl -sO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          ./antman --patch=glibc
+
+          echo "$GITHUB_WORKSPACE/neutron-clang/bin" >> $GITHUB_PATH
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+          echo "LTO=full" >> $GITHUB_ENV
+
+      - name: Compile Kernel
+        run: |
+          chmod +x ./build-kernel.sh
+          ./build-kernel.sh
+
+      - name: Package Boot Image
+        env:
+          BOOT_IMG_URL: "https://www.dropbox.com/scl/fi/16oax1feqzx2z9spqkudy/Shinkaiboot.img?rlkey=3fuh9bgja0djrsmutg2rvqo6a&st=cw6rafsz&dl=1"
+        shell: bash
+        run: |
+          mkdir -p repack/extracted repack/output
+
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/system/tools/mkbootimg \
+            repack/mkbootimg_tool
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/external/avb \
+            repack/avb_tool
+
+          curl -L "$BOOT_IMG_URL" -o repack/stock_boot.img
+
+          PARTITION_SIZE=$(stat -c %s "repack/stock_boot.img")
+          if [ "$PARTITION_SIZE" -lt 15000000 ]; then
+             echo "::error::Corrupt boot image downloaded."
+             exit 1
+          fi
+
+          export IMAGE_PATH="$GITHUB_WORKSPACE/work/dist/Image"
+          if [ ! -f "$IMAGE_PATH" ]; then
+             echo "::error::Compiled kernel Image does not exist."
+             exit 1
+          fi
+
+          python3 repack/mkbootimg_tool/unpack_bootimg.py \
+            --boot_img repack/stock_boot.img \
+            --out repack/extracted > repack/extracted/configs.txt
+
+          python3 - << 'EOF'
+          import sys, os, subprocess
+
+          config = {}
+          with open("repack/extracted/configs.txt") as f:
+              for line in f:
+                  if ":" in line:
+                      k, v = line.split(":", 1)
+                      config[k.strip().lower().replace("_", " ")] = v.strip()
+
+          hdr = config.get("boot image header version") or config.get("header version") or "4"
+          page = config.get("page size") or "4096"
+          cmd_args = config.get("command line args") or config.get("command line") or config.get("cmdline") or ""
+          board = config.get("name") or config.get("board name") or config.get("board") or ""
+          os_ver = config.get("os version") or ""
+          os_patch = config.get("os patch level") or ""
+
+          cmd = [
+              "python3", "repack/mkbootimg_tool/mkbootimg.py",
+              "--kernel", os.environ.get("IMAGE_PATH"),
+              "--header_version", str(hdr),
+              "--pagesize", str(page),
+              "--output", "repack/output/boot.img"
+          ]
+
+          if cmd_args: cmd.extend(["--cmdline", cmd_args])
+          if board: cmd.extend(["--board", board])
+          if os_ver and os_ver != "None": cmd.extend(["--os_version", os_ver])
+          if os_patch and os_patch != "None": cmd.extend(["--os_patch_level", os_patch])
+
+          for part in ("ramdisk", "dtb", "dtbo"):
+              p = f"repack/extracted/{part}"
+              if os.path.exists(p):
+                  cmd.extend([f"--{part}", p])
+
+          if subprocess.run(cmd).returncode != 0:
+              print("::error::mkbootimg repack failed.")
+              sys.exit(1)
+          EOF
+
+          if [ ! -f "repack/output/boot.img" ]; then
+             echo "::error::Repacked boot image not found."
+             exit 1
+          fi
+
+          python3 repack/avb_tool/avbtool.py add_hash_footer \
+            --image "repack/output/boot.img" \
+            --partition_name boot \
+            --partition_size "$PARTITION_SIZE" \
+            --key "repack/avb_tool/test/data/testkey_rsa2048.pem" \
+            --algorithm SHA256_RSA2048
+
+          cp repack/output/boot.img "$GITHUB_WORKSPACE/work/dist/boot.img"
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: build-kernel-${{ github.run_number }}
+          path: |
+            work/dist/Image
+            work/dist/Image.lz4
+            work/dist/Image.gz
+            work/dist/vmlinux
+            work/dist/System.map
+            work/dist/ikconfig
+            work/dist/.config
+            work/dist/boot.img
+          retention-days: 7
+
+      - name: Publish Release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$RELEASE_TAG"
+          if [ -z "$tag" ]; then
+            tag="kernel-$(date -u +%Y%m%d-%H%M)"
+          fi
+
+          cd "$GITHUB_WORKSPACE/work/dist"
+          pkg="$GITHUB_WORKSPACE/work/pkg"
+          mkdir -p "$pkg"
           assets=()
-          for f in ksu-assets/ksu-*.zip; do
+          for f in Image Image.lz4 Image.gz vmlinux System.map ikconfig .config boot.img; do
             [ -f "$f" ] && assets+=("$f")
           done
-          [ "${#assets[@]}" -gt 0 ] || { echo "no new FinaSU assets, nothing to upload"; exit 0; }
-          gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
-          echo "uploaded ${#assets[@]} FinaSU assets to $RELEASE_TAG"
+          tar -I 'zstd -T0' -cf "$pkg/kernel-dist.tar.zst" .
+          assets+=("$pkg/kernel-dist.tar.zst")
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" --clobber "${assets[@]}"
+          else
+            gh release create "$tag" \
+              --title "Kernel GKI $tag" \
+              --notes "Built with BakaSU + SuSFS + NoMount. $(date -u '+%Y-%m-%d %H:%M UTC')" \
+              "${assets[@]}"
+          fi
